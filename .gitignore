@@ -2,6 +2,7 @@ __pycache__
 stable_diffusion/
 *.zip
 *.mp4
+make_movie/1022/*.png
 
 
 /make_movie/cut_frame/
