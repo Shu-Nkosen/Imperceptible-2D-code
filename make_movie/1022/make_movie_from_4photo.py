@@ -3,9 +3,8 @@ from OpenGL.GL import *
 from PIL import Image
 import numpy as np
 import os
-import gc
 import time
-from collections import deque
+import gc
 import ctypes
 
 # Windowsの時間分解能を1msに設定（重要！）
@@ -37,19 +36,15 @@ BRIGHTNESS_DECREASE = BOTH  # 黒部分の輝度減少量
 # interval framerate / interval
 interval = 1  # 180Hzで動作
 
-# 各画像の表示回数（カウントベース）
-# 1の場合: normal/invを交互に表示
-# それ以外（例: 40）: 元画像を表示
-frame_durations = [1, 1]
+# 各画像の表示回数（カウントベース）[normal, orig, inv, orig]
+frame_durations = [1, 1, 1, 1]
+
 # ==============================
 
 def load_texture(image_path):
     """画像をOpenGLテクスチャとして読み込む"""
     img = Image.open(image_path)
-    
-    # 1920x1080にリサイズ
     img = img.resize((1920, 1080), Image.LANCZOS)
-    
     img_data = np.array(img, dtype=np.uint8)
     
     texture_id = glGenTextures(1)
@@ -108,7 +103,6 @@ if not glfw.init():
     raise Exception("GLFW initialization failed")
 
 window = glfw.create_window(1920, 1080, "Image Flicker", None, None)
-
 if not window:
     glfw.terminate()
     raise Exception("Window creation failed")
@@ -136,44 +130,28 @@ for img_file in [normal_file, inv_file, orig_file]:
         print(f"読み込み完了: {img_file} (ID: {texture_id})")
     else:
         print(f"Warning: {img_file} が見つかりません")
+        glfw.terminate()
+        raise FileNotFoundError(f"{img_file} が見つかりません")
 
 # frame_durationsに基づいて表示するテクスチャIDのリストを生成
-texture_sequence = []
-is_normal = True  # normal/invを交互に切り替えるフラグ
-
-for duration in frame_durations:
-    if duration == 1:
-        # 1の場合: normal/invを交互に
-        if is_normal:
-            texture_sequence.append(texture_cache[normal_file])
-        else:
-            texture_sequence.append(texture_cache[inv_file])
-        is_normal = not is_normal
-    else:
-        # 1以外の場合: 元画像を表示
-        texture_sequence.append(texture_cache[orig_file])
+# [normal, orig, inv, orig]
+texture_sequence = [
+    texture_cache[normal_file],
+    texture_cache[orig_file],
+    texture_cache[inv_file],
+    texture_cache[orig_file]
+]
 
 # テクスチャ読み込み後に明示的にガベージコレクション
 gc.collect()
-
-print(f"\n表示パターン:")
-is_normal = True
-for i, duration in enumerate(frame_durations):
-    if duration == 1:
-        img_type = "normal" if is_normal else "inv"
-        is_normal = not is_normal
-    else:
-        img_type = "original"
-    print(f"  {i}: {img_type} ({duration}フレーム)")
 
 # 表示管理用のインデックスとカウンター
 current_display_index = 0
 frame_display_counter = 0
 
 # デバッグ用
-frame_times = deque(maxlen=100)
-swap_times = deque(maxlen=1000)
 last_switch_time = time.perf_counter()
+frame_times = []
 
 print(f"\n設定:")
 print(f"  選択画像: {selected_base_name} (番号: {SELECTED_IMAGE})")
@@ -181,43 +159,37 @@ print(f"  輝度増加量: {BRIGHTNESS_INCREASE}")
 print(f"  輝度減少量: {BRIGHTNESS_DECREASE}")
 print(f"  リフレッシュ間隔: {interval}")
 print(f"  ユニークなテクスチャ数: {len(texture_cache)}")
-print(f"  表示シーケンス長: {len(texture_sequence)}")
+print(f"  表示パターン: normal -> orig -> inv -> orig")
 print(f"\nプログラム実行中... (ESCキーまたはウィンドウを閉じて終了)")
 
-total_frames = 0
-last_frame_time = time.perf_counter()
-
 while not glfw.window_should_close(window):
-    # 現在のテクスチャを描画（テクスチャIDを直接使用）
+    # 現在のインデックスの画像を描画（テクスチャIDを直接使用）
     draw_texture(texture_sequence[current_display_index])
     
-    # swap直前の時刻
-    pre_swap_time = time.perf_counter()
     glfw.swap_buffers(window)
-    post_swap_time = time.perf_counter()
     
-    # swapにかかった時間を記録
-    swap_duration = (post_swap_time - pre_swap_time) * 1000
-    swap_times.append(swap_duration)
+    # swap後にタイミング計測
+    current_time = time.perf_counter()
     
     glfw.poll_events()
     
     # カウンターを増やす
     frame_display_counter += 1
-    total_frames += 1
 
     # 表示回数が設定値に達したら次へ切り替え
     if frame_display_counter >= frame_durations[current_display_index]:
-        switch_duration = (post_swap_time - last_switch_time) * 1000
+        # デバッグ情報
+        switch_duration = (current_time - last_switch_time) * 1000
+        expected = frame_durations[current_display_index] * (1000.0 / 180.0)
         frame_times.append(switch_duration)
         
-        # 切り替えごとに表示
-        expected = frame_durations[current_display_index] * (1000.0 / 180.0)
-        print(f"Image {current_display_index}: {switch_duration:.2f}ms (expected={expected:.2f}ms, frames={frame_display_counter})")
+        if len(frame_times) % 20 == 0:  # 20回ごとに表示
+            avg = sum(frame_times[-20:]) / 20
+            print(f"Image {current_display_index}: {switch_duration:.2f}ms (expected: {expected:.2f}ms, avg: {avg:.2f}ms)")
         
         frame_display_counter = 0
         current_display_index = (current_display_index + 1) % len(texture_sequence)
-        last_switch_time = post_swap_time
+        last_switch_time = current_time
 
 # 終了処理
 for texture_id in texture_cache.values():
