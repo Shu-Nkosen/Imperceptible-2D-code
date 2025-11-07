@@ -5,8 +5,8 @@ from PIL import Image
 
 # ======= ユーザー設定 ==========
 # 比較する2つの画像のパス
-IMAGE1_PATH = "frame_00000.png"  # 1フレーム目
-IMAGE2_PATH = "frame_00001.png"  # 2フレーム目
+IMAGE1_PATH = "DSC_0000.jpg"  # 1フレーム目
+IMAGE2_PATH = "DSC_0005.jpg"  # 2フレーム目
 
 # 閾値設定（0-1の範囲で指定）
 THRESHOLD = 4/255  # 1/255以上の変化を検出
