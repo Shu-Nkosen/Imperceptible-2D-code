@@ -6,6 +6,11 @@ make_movie/1022/*.png
 make_movie/frames2-ex-1/*.png
 make_movie/frames2-ex-1/frame_diff_analysis
 make_movie/1107/*.jpg
+make_movie/1111/*.JPG
+make_movie/1111/frames20251111/*.png
+make_movie/1111/frame_diff_analysis/*.png
+make_movie/1111/frames20251111/frame_diff_analysis/*.png
+make_movie/movie_frame_2_4/*.png
 
 
 /make_movie/cut_frame/

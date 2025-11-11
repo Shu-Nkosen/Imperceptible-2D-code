@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include <windows.h>
 #include <time.h>
+#include <direct.h> 
+
+#ifndef GL_CLAMP_TO_EDGE
+#define GL_CLAMP_TO_EDGE 0x812F
+#endif
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"  // 画像読み込み用（https://github.com/nothings/stb）
@@ -13,13 +18,22 @@
 #define BRIGHTNESS_DECREASE 2
 #define INTERVAL 1
 
+void print_current_directory(void) {
+    char cwd[MAX_PATH];
+    if (_getcwd(cwd, sizeof(cwd))) {
+        printf("[DEBUG] Current working directory: %s\n", cwd);
+    } else {
+        perror("[DEBUG] _getcwd failed");
+    }
+}
+
 // 画像ベース名
 const char* base_image_names[] = {
     "hocho", "kosen", "nagaoka_fireworks", "rice", "ex"
 };
 
 // 表示パターン
-int frame_durations[] = {1, 1};
+int frame_durations[] = { 1, 1};  // 各パターンのフレーム数
 int num_patterns = 2;
 
 // テクスチャID格納
@@ -30,13 +44,19 @@ GLuint texture_sequence[10];  // 最大10パターン
 
 // 画像読み込み
 GLuint load_texture(const char* filename) {
+    
+    printf("[DEBUG] Attempting to load texture: %s\n", filename);
+
     int width, height, channels;
     unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
-    
+
     if (!data) {
-        printf("Failed to load: %s\n", filename);
+        printf("[ERROR] stbi_load failed for: %s\n", filename);
         return 0;
     }
+
+    printf("[DEBUG] stbi_load success: %s (width=%d, height=%d, channels=%d)\n",
+           filename, width, height, channels);
     
     GLuint texture_id;
     glGenTextures(1, &texture_id);
@@ -51,6 +71,7 @@ GLuint load_texture(const char* filename) {
     // データ転送
     GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
     glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+
     
     stbi_image_free(data);
     printf("Loaded: %s (ID: %u)\n", filename, texture_id);
@@ -85,6 +106,7 @@ double get_time_ms() {
 
 int main() {
     // Windowsタイマー精度を1msに設定
+    print_current_directory();
     timeBeginPeriod(1);
     
     // GLFW初期化
@@ -134,29 +156,33 @@ int main() {
     // メインループ
     int current_index = 0;
     int frame_counter = 0;
-    double last_switch_time = get_time_ms();
+    double measurement_start_time = get_time_ms();
+    int frames_since_measurement = 0;
+    const int TIMING_INTERVAL_FRAMES = 180;
     
     while (!glfwWindowShouldClose(window)) {
         draw_texture(texture_sequence[current_index]);
-        
-        double pre_swap = get_time_ms();
         glfwSwapBuffers(window);
-        double post_swap = get_time_ms();
-        
         glfwPollEvents();
         
         frame_counter++;
+        frames_since_measurement++;
         
         if (frame_counter >= frame_durations[current_index]) {
-            double switch_duration = post_swap - last_switch_time;
-            double expected = frame_durations[current_index] * (1000.0 / 180.0);
-            
-            printf("Image %d: %.2fms (expected=%.2fms, frames=%d)\n",
-                   current_index, switch_duration, expected, frame_counter);
-            
             frame_counter = 0;
             current_index = (current_index + 1) % seq_len;
-            last_switch_time = post_swap;
+        }
+        
+        if (frames_since_measurement >= TIMING_INTERVAL_FRAMES) {
+            double now = get_time_ms();
+            double elapsed = now - measurement_start_time;
+            double expected = frames_since_measurement * (1000.0 / 180.0);
+            
+            // printf("[DEBUG] %d frames in %.2fms (expected=%.2fms)\n",
+            //        frames_since_measurement, elapsed, expected);
+            
+            measurement_start_time = now;
+            frames_since_measurement = 0;
         }
     }
     
