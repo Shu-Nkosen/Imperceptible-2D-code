@@ -3,8 +3,8 @@ import numpy as np
 import os
 
 # パラメータ設定
-BRIGHTNESS_INCREASE = 2  # 白部分の輝度増加量
-BRIGHTNESS_DECREASE = 2  # 黒部分の輝度減少量
+BRIGHTNESS_INCREASE = 120  # 白部分の輝度増加量
+BRIGHTNESS_DECREASE = 120  # 黒部分の輝度減少量
 INVERT_QR = False  # True: QRコードの白黒を反転, False: 通常
 
 def adjust_brightness_by_qr(image_path, qr_path, bright_increase, bright_decrease, invert=False):
