@@ -9,8 +9,15 @@ make_movie/1107/*.jpg
 make_movie/1111/*.JPG
 make_movie/1111/frames20251111/*.png
 make_movie/1111/frame_diff_analysis/*.png
-make_movie/1111/frames20251111/frame_diff_analysis/*.png
+make_movie/1111/frames20251111/frame_diff_analysis/
 make_movie/movie_frame_2_4/*.png
+make_movie/1119/*.JPG
+make_movie/1119/60_frame_diff_analysis/
+make_movie/1119/frames20251119_60/*.png
+make_movie/1119/frames20251119_60/frame_diff_analysis/
+make_movie/1119/250_frame_diff_analysis/
+make_movie/1119/frames20251119_250/*.png
+make_movie/1119/frames20251119_250/frame_diff_analysis/
 
 
 /make_movie/cut_frame/
