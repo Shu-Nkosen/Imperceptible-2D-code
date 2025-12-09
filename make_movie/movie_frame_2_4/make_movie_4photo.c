@@ -1,3 +1,6 @@
+// 実行方法
+// gcc make_movie_4photo.c   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include"  -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib"   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_4photo.exe
+
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +17,7 @@
 
 // ユーザー設定
 #define SELECTED_IMAGE 4
-#define BRIGHTNESS_INCREASE 2
+#define BRIGHTNESS_INCREASE 0
 #define BRIGHTNESS_DECREASE 2
 #define INTERVAL 1
 
