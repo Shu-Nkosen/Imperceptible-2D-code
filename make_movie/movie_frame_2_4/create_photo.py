@@ -3,9 +3,9 @@ import numpy as np
 import os
 
 # パラメータ設定
-BRIGHTNESS_INCREASE = 120  # 白部分の輝度増加量
-BRIGHTNESS_DECREASE = 120  # 黒部分の輝度減少量
-INVERT_QR = False  # True: QRコードの白黒を反転, False: 通常
+BRIGHTNESS_INCREASE = 0  # 白部分の輝度増加量
+BRIGHTNESS_DECREASE = 3  # 黒部分の輝度減少量
+INVERT_QR = True  # True: QRコードの白黒を反転, False: 通常
 
 def adjust_brightness_by_qr(image_path, qr_path, bright_increase, bright_decrease, invert=False):
     """
@@ -47,7 +47,17 @@ def adjust_brightness_by_qr(image_path, qr_path, bright_increase, bright_decreas
     
     # BGRをHSVに変換
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV).astype(np.float32)
-    
+
+    # 変化量の最大値で事前クリップ
+    max_change = max(bright_increase, bright_decrease)
+    if max_change > 0:
+        lower_bound = float(max_change)
+        upper_bound = float(255 - max_change)
+        if lower_bound >= upper_bound:
+            print(f"Error: 変化量が大きすぎます (bright_increase={bright_increase}, bright_decrease={bright_decrease})")
+            return
+        hsv[:, :, 2] = np.clip(hsv[:, :, 2], lower_bound, upper_bound)
+
     # 正方形領域のみを処理
     square_region = hsv[:, x_offset:x_offset+square_size, :]
     
