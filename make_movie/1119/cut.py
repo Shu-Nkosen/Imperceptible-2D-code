@@ -35,6 +35,6 @@ def split_video_into_frames(video_path, output_folder):
     print(f"{frame_number} 枚のフレームを保存しました。")
 
 # 使用例
-video_file_path = "20251119_250.mp4"       # 分割したい動画のファイルパス
-output_dir = "frames20251119_250"             # フレームの保存先フォルダ
+video_file_path = "20251119_60.mp4"       # 分割したい動画のファイルパス
+output_dir = "a"             # フレームの保存先フォルダ
 split_video_into_frames(video_file_path, output_dir)
