@@ -2,6 +2,7 @@ __pycache__
 stable_diffusion/
 *.zip
 *.mp4
+*.exe
 make_movie/1022/*.png
 make_movie/frames2-ex-1/*.png
 make_movie/frames2-ex-1/frame_diff_analysis
@@ -17,9 +18,10 @@ make_movie/1119/frames20251119_60/*.png
 make_movie/1119/frames20251119_60/frame_diff_analysis/
 make_movie/1119/250_frame_diff_analysis/
 make_movie/1119/frames20251119_250/*.png
-make_movie/1119/frames20251119_250/frame_diff_analysis/
+make_movie/1119/frames20251119_250/frame_diff_analysis_Y/
+make_movie/1119/frames20251119_250/rgb_max_diff_maps/
 make_movie/movie_frame_2_4/done
-
+make_movie/1218
 
 /make_movie/cut_frame/
 

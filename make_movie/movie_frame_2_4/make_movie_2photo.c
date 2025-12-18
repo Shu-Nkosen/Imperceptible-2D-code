@@ -18,7 +18,7 @@
 // ユーザー設定
 #define SELECTED_IMAGE 4
 #define BRIGHTNESS_INCREASE 0
-#define BRIGHTNESS_DECREASE 2
+#define BRIGHTNESS_DECREASE 3
 #define INTERVAL 1
 
 void print_current_directory(void) {
@@ -131,16 +131,13 @@ int main() {
     char filename[256];
     const char* base_name = base_image_names[SELECTED_IMAGE];
     
-    snprintf(filename, sizeof(filename), "%s_b%d_d%d_normal.png", 
+    snprintf(filename, sizeof(filename), "%s_b%d_d%d_normalI.png", 
              base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE);
     normal_texture = load_texture(filename);
     
-    snprintf(filename, sizeof(filename), "%s_b%d_d%d_inv.png", 
+    snprintf(filename, sizeof(filename), "%s_b%d_d%d_invI.png", 
              base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE);
     inv_texture = load_texture(filename);
-    
-    snprintf(filename, sizeof(filename), "%s.png", base_name);
-    orig_texture = load_texture(filename);
     
     // テクスチャシーケンス生成
     int is_normal = 1;

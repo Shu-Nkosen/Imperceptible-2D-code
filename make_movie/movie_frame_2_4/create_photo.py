@@ -3,25 +3,16 @@ import numpy as np
 import os
 
 # パラメータ設定
-BRIGHTNESS_INCREASE = 0  # 白部分の輝度増加量
-BRIGHTNESS_DECREASE = 3  # 黒部分の輝度減少量
+XX = 2
+BRIGHTNESS_INCREASE_MAX = 0
+BRIGHTNESS_DECREASE_MAX = XX
+BRIGHTNESS_INCREASE_MIN = 0
+BRIGHTNESS_DECREASE_MIN = XX
 INVERT_QR = True  # True: QRコードの白黒を反転, False: 通常
 
-def adjust_brightness_by_qr(image_path, qr_path, bright_increase, bright_decrease, invert=False):
-    """
-    QRコードのパターンに基づいて画像の輝度を調整
-    
-    Args:
-        image_path: 元画像のパス
-        qr_path: QRコードのパス
-        bright_increase: 白部分の輝度増加量
-        bright_decrease: 黒部分の輝度減少量
-        invert: QRコードの白黒を反転するか
-    """
-    # 画像とQRコードを読み込み
+def adjust_brightness_by_qr(image_path, qr_path, bright_increase, bright_decrease, invert=False, output_tag=None):
     image = cv2.imread(image_path)
     qr_code = cv2.imread(qr_path, cv2.IMREAD_GRAYSCALE)
-    
     if image is None or qr_code is None:
         print(f"Error: 画像の読み込みに失敗しました - {image_path} or {qr_path}")
         return
@@ -80,43 +71,74 @@ def adjust_brightness_by_qr(image_path, qr_path, bright_increase, bright_decreas
     
     # ファイル名を生成
     base_name = os.path.splitext(os.path.basename(image_path))[0]
-    invert_str = "inv" if invert else "normal"
-    output_name = f"{base_name}_b{bright_increase}_d{bright_decrease}_{invert_str}.png"
+    if output_tag is None:
+        invert_str = "inv" if invert else "normal"
+        output_tag = f"b{bright_increase}_d{bright_decrease}_{invert_str}"
+    output_name = f"{base_name}_{output_tag}.png"
     output_path = os.path.join(os.path.dirname(image_path), output_name)
-    
+
     # 保存
     cv2.imwrite(output_path, result)
     print(f"保存完了: {output_name}")
 
+def compute_min_channel_difference(img1: np.ndarray, img2: np.ndarray):
+    diff_all = img2 - img1
+    abs_diff = np.abs(diff_all)
+    min_indices = np.argmin(abs_diff, axis=2)
+    diff_map = np.take_along_axis(diff_all, min_indices[..., None], axis=2).squeeze(-1)
+    return diff_map
+
+
+
 def main():
-    # カレントディレクトリを取得
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # QRコードのパス
     qr_path = os.path.join(current_dir, "HP_QR.png")
-    
-    # 処理対象の画像リスト (QR以外)
-    target_images = [
-        "rice.png",
-        "kosen.png",
-        "nagaoka_fireworks.png",
-        "hocho.png",
-        "ex.png"
+    target_images = ["rice.png", "kosen.png", "nagaoka_fireworks.png", "hocho.png", "ex.png"]
+
+    modes = [
+        {
+            "bright_increase": BRIGHTNESS_INCREASE_MAX,
+            "bright_decrease": BRIGHTNESS_DECREASE_MAX,
+            "invert": True,
+            "suffix": "X",
+        },
+        {
+            "bright_increase": BRIGHTNESS_INCREASE_MAX,
+            "bright_decrease": BRIGHTNESS_DECREASE_MAX,
+            "invert": False,
+            "suffix": "X",
+        },
+        {
+            "bright_increase": BRIGHTNESS_INCREASE_MIN,
+            "bright_decrease": BRIGHTNESS_DECREASE_MIN,
+            "invert": True,
+            "suffix": "I",
+        },
+        {
+            "bright_increase": BRIGHTNESS_INCREASE_MIN,
+            "bright_decrease": BRIGHTNESS_DECREASE_MIN,
+            "invert": False,
+            "suffix": "I",
+        },
     ]
-    
-    # 各画像を処理
+
+
     for img_name in target_images:
         img_path = os.path.join(current_dir, img_name)
-        if os.path.exists(img_path):
-            adjust_brightness_by_qr(
-                img_path, 
-                qr_path, 
-                BRIGHTNESS_INCREASE, 
-                BRIGHTNESS_DECREASE, 
-                INVERT_QR
-            )
-        else:
+        if not os.path.exists(img_path):
             print(f"Warning: {img_name} が見つかりません")
+            continue
+        for mode in modes:
+            invert_str = "inv" if mode["invert"] else "normal"
+            output_tag = f"b{mode['bright_increase']}_d{mode['bright_decrease']}_{invert_str}{mode['suffix']}"
+            adjust_brightness_by_qr(
+                img_path,
+                qr_path,
+                mode["bright_increase"],
+                mode["bright_decrease"],
+                invert=mode["invert"],
+                output_tag=output_tag,
+            )
 
 if __name__ == "__main__":
     main()
