@@ -7,6 +7,27 @@
 #include <windows.h>
 #include <time.h>
 #include <direct.h> 
+#ifndef SELECTED_IMAGE
+#define SELECTED_IMAGE 4
+#endif
+
+#ifndef BRIGHTNESS_DECREASE
+#define BRIGHTNESS_DECREASE 10
+#endif
+
+#ifndef INTERVAL
+#define INTERVAL 1
+#endif
+
+// COLOR はトークンで持つ（X, I, R, G, B など）
+#ifndef COLOR
+#define COLOR X
+#endif
+
+// トークン→文字列
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
 
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -15,12 +36,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"  // 画像読み込み用（https://github.com/nothings/stb）
 
-// ユーザー設定
-#define SELECTED_IMAGE 4
-#define BRIGHTNESS_INCREASE 0
-#define BRIGHTNESS_DECREASE 4
-#define INTERVAL 1
-#define COLOR "X"
 
 void print_current_directory(void) {
     char cwd[MAX_PATH];
@@ -118,7 +133,12 @@ int main() {
         fprintf(stderr, "GLFW initialization failed\n");
         return -1;
     }
-    
+
+    // ウィンドウ装飾を外し、起動時に最大化
+    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
+
     GLFWwindow* window = glfwCreateWindow(1920, 1080, "Image Flicker (C)", NULL, NULL);
     if (!window) {
         glfwTerminate();
@@ -132,12 +152,12 @@ int main() {
     char filename[256];
     const char* base_name = base_image_names[SELECTED_IMAGE];
     
-    snprintf(filename, sizeof(filename), "%s_b%d_d%d_normal%s.png", 
-             base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE, COLOR);
+    snprintf(filename, sizeof(filename), "%s_%d_normal%s.png", 
+             base_name,  BRIGHTNESS_DECREASE, STR(COLOR));
     normal_texture = load_texture(filename);
     
-    snprintf(filename, sizeof(filename), "%s_b%d_d%d_inv%s.png", 
-             base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE);
+    snprintf(filename, sizeof(filename), "%s_%d_inv%s.png", 
+             base_name, BRIGHTNESS_DECREASE, STR(COLOR));
     inv_texture = load_texture(filename);
     
     // テクスチャシーケンス生成

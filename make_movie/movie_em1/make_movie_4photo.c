@@ -1,5 +1,5 @@
 // 実行方法
-// gcc make_movie_2photo.c   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include"  -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib"   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_2photo.exe
+// gcc make_movie_4photo.c   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include"  -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib"   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_4photo.exe
 
 #include <GLFW/glfw3.h>
 #include <stdio.h>
@@ -18,9 +18,8 @@
 // ユーザー設定
 #define SELECTED_IMAGE 4
 #define BRIGHTNESS_INCREASE 0
-#define BRIGHTNESS_DECREASE 4
+#define BRIGHTNESS_DECREASE 2
 #define INTERVAL 1
-#define COLOR "X"
 
 void print_current_directory(void) {
     char cwd[MAX_PATH];
@@ -37,8 +36,8 @@ const char* base_image_names[] = {
 };
 
 // 表示パターン
-int frame_durations[] = { 1, 1};  // 各パターンのフレーム数
-int num_patterns = 2;
+int frame_durations[] = {1, 1, 1, 1};  // 各パターンのフレーム数
+int num_patterns = 4;
 
 // テクスチャID格納
 GLuint normal_texture = 0;
@@ -132,27 +131,27 @@ int main() {
     char filename[256];
     const char* base_name = base_image_names[SELECTED_IMAGE];
     
-    snprintf(filename, sizeof(filename), "%s_b%d_d%d_normal%s.png", 
-             base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE, COLOR);
+    snprintf(filename, sizeof(filename), "%s_b%d_d%d_normal.png", 
+             base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE);
     normal_texture = load_texture(filename);
     
-    snprintf(filename, sizeof(filename), "%s_b%d_d%d_inv%s.png", 
+    snprintf(filename, sizeof(filename), "%s_b%d_d%d_inv.png", 
              base_name, BRIGHTNESS_INCREASE, BRIGHTNESS_DECREASE);
     inv_texture = load_texture(filename);
     
-    // テクスチャシーケンス生成
-    int is_normal = 1;
-    int seq_len = 0;
-    for (int i = 0; i < num_patterns; i++) {
-        if (frame_durations[i] == 1) {
-            texture_sequence[seq_len++] = is_normal ? normal_texture : inv_texture;
-            is_normal = !is_normal;
-        } else {
-            texture_sequence[seq_len++] = orig_texture;
-        }
-    }
+    snprintf(filename, sizeof(filename), "%s.png", base_name);
+    orig_texture = load_texture(filename);
     
-    printf("Starting render loop...\n");
+    
+    printf("Starting render loop...\n");    
+    
+    // テクスチャシーケンス生成
+    int seq_len = 0;
+    texture_sequence[seq_len++] = inv_texture;
+    texture_sequence[seq_len++] = orig_texture;
+    texture_sequence[seq_len++] = normal_texture;
+    texture_sequence[seq_len++] = orig_texture;
+
     
     // メインループ
     int current_index = 0;
@@ -180,7 +179,7 @@ int main() {
             double expected = frames_since_measurement * (1000.0 / 180.0);
             
             // printf("[DEBUG] %d frames in %.2fms (expected=%.2fms)\n",
-            //        frames_since_measurement, elapsed, expected);
+                //    frames_since_measurement, elapsed, expected);
             
             measurement_start_time = now;
             frames_since_measurement = 0;

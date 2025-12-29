@@ -3,7 +3,7 @@ import numpy as np
 import os
 
 # パラメータ設定
-XX = 2
+XX = 10
 BRIGHTNESS_DECREASE_POS = XX
 BRIGHTNESS_DECREASE_NEG = -XX
 
@@ -31,6 +31,16 @@ def adjust_brightness_by_qr(image_path, qr_path, bright_decrease, value_mode="ma
 
     # 正方形領域のみを処理
     square_region = image[:, x_offset:x_offset+square_size, :].astype(np.float32)
+
+    max_change = abs(bright_decrease)
+    if max_change > 0:
+        lower_bound = float(max_change)
+        upper_bound = float(255 - max_change)
+        if lower_bound >= upper_bound:
+            print(f"Error: 変化量が大きすぎます (bright_decrease={bright_decrease})")
+            return
+        # 事前クリップしてオーバーフローを防止
+        square_region = np.clip(square_region, lower_bound, upper_bound)
 
     # マスクを作成 (白部分と黒部分)
     white_mask = qr_binary == 255
