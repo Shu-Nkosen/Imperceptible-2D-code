@@ -9,7 +9,7 @@ from typing import Tuple, Union, List
 # ======= ユーザー設定 ==========
 IMAGE_PATTERN = "frame_?????.png"
 THRESHOLD = 2 / 255
-QUALITY_SCALE = 0.3
+QUALITY_SCALE = 1.0
 RESIZE_METHOD = "nearest"  # "nearest" | "bilinear" | "bicubic"
 
 COLOR_INCREASED: Union[str, Tuple[float, float, float]] = "#ffffff"

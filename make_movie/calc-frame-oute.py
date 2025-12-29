@@ -11,11 +11,11 @@ IMAGE1_PATH = "DSC_0000_BURST20251119160910215.JPG"
 IMAGE2_PATH = "DSC_0001_BURST20251119160910215.JPG"
 
 IMAGE_PATTERN = "frame_?????.png"
-THRESHOLD = 2/255
+THRESHOLD = 1/255
 QUALITY_SCALE = 1
 RESIZE_METHOD = "nearest"
-OUTPUT_DIR = "frame_diff_Y"
-MAX_OFFSET = 5
+OUTPUT_DIR = "frame_diff_analysis"
+MAX_OFFSET = 1
 # ==============================
 
 def parse_frame_info(stem: str):
@@ -85,9 +85,9 @@ def classify_luminance_change(img1, img2, threshold):
 def save_combined_map(increased, decreased, unchanged, output_path):
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     combined = np.zeros((*increased.shape, 3))
-    combined[increased] = [1, 0, 0]
-    combined[decreased] = [0, 0, 1]
-    combined[unchanged] = [0.5, 0.5, 0.5]
+    combined[increased] = [0, 0, 0]
+    combined[decreased] = [0, 0, 0]
+    combined[unchanged] = [1, 1, 1]
 
     ax.imshow(combined)
     ax.set_title(f'Combined Classification Map (Scale: {QUALITY_SCALE})\nRed: Increased | Blue: Decreased | Gray: Unchanged')
