@@ -12,11 +12,11 @@
 #endif
 
 #ifndef BRIGHTNESS_DECREASE
-#define BRIGHTNESS_DECREASE 2
+#define BRIGHTNESS_DECREASE 10
 #endif
 
 #ifndef INTERVAL
-#define INTERVAL 1
+#define INTERVAL 180
 #endif
 
 // COLOR はトークンで持つ（X, I, R, G, B など）

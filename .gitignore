@@ -22,9 +22,16 @@ make_movie/1119/frames20251119_250/frame_diff_analysis_Y/
 make_movie/1119/frames20251119_250/rgb_max_diff_maps/
 make_movie/movie_frame_2_4/done
 make_movie/1218
-make_movie/movie_em1/*.png
 make_movie/1229
 make_movie/1229te
+make_movie/1230/*.png
+make_movie/1230/*/*.png
+make_movie/1230/*/*/*.png
+
+
+
+make_movie/movie_em1/*.png
+make_movie/movie_em14/*.png
 
 /make_movie/cut_frame/
 

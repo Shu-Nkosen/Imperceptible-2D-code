@@ -1,5 +1,5 @@
 // 実行方法
-// gcc make_movie_4photo.c   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include"  -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib"   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_4photo.exe
+// gcc make_movie_2photo.c   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include"  -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib"   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_2photo.exe
 
 #include <GLFW/glfw3.h>
 #include <stdio.h>
@@ -52,8 +52,8 @@ const char* base_image_names[] = {
 };
 
 // 表示パターン
-int frame_durations[] = { 1, 1, 1, 1};  // 各パターンのフレーム数
-int num_patterns = 4;
+int frame_durations[] = { 1, 1};  // 各パターンのフレーム数
+int num_patterns = 2;
 
 // テクスチャID格納
 GLuint normal_texture = 0;
@@ -127,6 +127,10 @@ int main() {
     // Windowsタイマー精度を1msに設定
     print_current_directory();
     timeBeginPeriod(1);
+
+    LARGE_INTEGER qpc_frequency;
+    QueryPerformanceFrequency(&qpc_frequency);
+    const double qpc_to_ms = 1000.0 / (double)qpc_frequency.QuadPart;
     
     // GLFW初期化
     if (!glfwInit()) {
@@ -135,7 +139,7 @@ int main() {
     }
 
     // ウィンドウ装飾を外し、起動時に最大化
-    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+    // glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 
@@ -147,6 +151,13 @@ int main() {
     
     glfwMakeContextCurrent(window);
     glfwSwapInterval(INTERVAL);  // 垂直同期
+
+    // 実モニタのリフレッシュレートを表示
+    GLFWmonitor* primary = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(primary);
+    if (mode) {
+        printf("Monitor refresh: %d Hz, interval=%d\n", mode->refreshRate, INTERVAL);
+    }
     
     // 画像読み込み
     char filename[256];
@@ -159,16 +170,18 @@ int main() {
     snprintf(filename, sizeof(filename), "%s_%d_inv%s.png", 
              base_name, BRIGHTNESS_DECREASE, STR(COLOR));
     inv_texture = load_texture(filename);
-
-        snprintf(filename, sizeof(filename), "%s.png", base_name);
-    orig_texture = load_texture(filename);
     
-    // テクスチャシーケンス生成（inv → base → normal → base）
+    // テクスチャシーケンス生成
+    int is_normal = 1;
     int seq_len = 0;
-    texture_sequence[seq_len++] = inv_texture;
-    texture_sequence[seq_len++] = orig_texture;
-    texture_sequence[seq_len++] = normal_texture;
-    texture_sequence[seq_len++] = orig_texture;
+    for (int i = 0; i < num_patterns; i++) {
+        if (frame_durations[i] == 1) {
+            texture_sequence[seq_len++] = is_normal ? normal_texture : inv_texture;
+            is_normal = !is_normal;
+        } else {
+            texture_sequence[seq_len++] = orig_texture;
+        }
+    }
     
     printf("Starting render loop...\n");
     
@@ -179,9 +192,18 @@ int main() {
     int frames_since_measurement = 0;
     const int TIMING_INTERVAL_FRAMES = 180;
     
+    double swap_acc_ms = 0.0;
+    double frame_acc_ms = 0.0;
+    int swap_samples = 0;
+    const int REPORT_INTERVAL = 300;  // ログの頻度を抑えてオーバーヘッド最小化
+    LARGE_INTEGER prev_swap = {0};
+
     while (!glfwWindowShouldClose(window)) {
         draw_texture(texture_sequence[current_index]);
+        LARGE_INTEGER pre_swap, post_swap;
+        QueryPerformanceCounter(&pre_swap);
         glfwSwapBuffers(window);
+        QueryPerformanceCounter(&post_swap);
         glfwPollEvents();
         
         frame_counter++;
@@ -192,16 +214,24 @@ int main() {
             current_index = (current_index + 1) % seq_len;
         }
         
-        if (frames_since_measurement >= TIMING_INTERVAL_FRAMES) {
-            double now = get_time_ms();
-            double elapsed = now - measurement_start_time;
-            double expected = frames_since_measurement * (1000.0 / 180.0);
-            
-            // printf("[DEBUG] %d frames in %.2fms (expected=%.2fms)\n",
-            //        frames_since_measurement, elapsed, expected);
-            
-            measurement_start_time = now;
-            frames_since_measurement = 0;
+        // 軽量なタイミング計測: swap時間とフレーム間隔の平均を一定間隔でだけ出力
+        double swap_ms = (double)(post_swap.QuadPart - pre_swap.QuadPart) * qpc_to_ms;
+        swap_acc_ms += swap_ms;
+        if (prev_swap.QuadPart != 0) {
+            double frame_ms = (double)(post_swap.QuadPart - prev_swap.QuadPart) * qpc_to_ms;
+            frame_acc_ms += frame_ms;
+        }
+        prev_swap = post_swap;
+
+        swap_samples++;
+        if (swap_samples >= REPORT_INTERVAL) {
+            double avg_swap = swap_acc_ms / (double)swap_samples;
+            double avg_frame = frame_acc_ms / (double)(swap_samples - 1 > 0 ? swap_samples - 1 : 1);
+            printf("[TIMING] interval=%d avg_swap=%.3fms avg_frame=%.3fms samples=%d\n",
+                   INTERVAL, avg_swap, avg_frame, swap_samples);
+            swap_acc_ms = 0.0;
+            frame_acc_ms = 0.0;
+            swap_samples = 0;
         }
     }
     
