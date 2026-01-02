@@ -3,7 +3,8 @@ import numpy as np
 import os
 
 # ======= パラメータ設定 =======
-XX = 4                       # 変化させるRGB量
+XX = 8
+# 変化させるRGB量
 BRIGHTNESS_DECREASE_POS = XX  # 暗くする量
 BRIGHTNESS_DECREASE_NEG = -XX # 明るくする量
 PRE_CLIP_MARGIN = 4           # 事前クリップマージン

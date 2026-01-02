@@ -27,7 +27,10 @@ make_movie/1229te
 make_movie/1230/*.png
 make_movie/1230/*/*.png
 make_movie/1230/*/*/*.png
-
+make_movie/1231/*.png
+make_movie/1231/*/*.png
+make_movie/1231/*/*/*.png
+make_movie/1231/*.mp4
 
 
 make_movie/movie_em1/*.png
@@ -35,6 +38,7 @@ make_movie/movie_em14/*.png
 
 /make_movie/cut_frame/
 
+other
 0118/
 0123/
 0213/
