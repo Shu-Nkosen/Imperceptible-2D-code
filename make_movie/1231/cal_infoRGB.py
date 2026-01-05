@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 import re
 
-# ======= ユーザー設定 (RGB版 + 全体ノイズ評価) ==========
+# ======================================================
+#  ユーザー設定 (RGB版 + 正解率 Accuracy 追加版)
+# ======================================================
 IMAGE_PATTERN = "frame_?????.png"
 GT_IMAGE_PATH = "frames_QR.png"
 
@@ -20,17 +22,20 @@ RESIZE_METHOD = "nearest"
 # 正解データ作成用 (輝度20%以下を黒とする)
 GT_BLACK_THRESHOLD = 0.2
 
-# ROI設定 (Recall, Precision用)
+# ROI設定 (ROI内での Metrics 計算用)
 ROI_HEIGHT_RATIO = 0.7   
 ROI_SHAPE = "square"
 
-OUTPUT_DIR = "frame_eval_analysis_rgb_v2"
+OUTPUT_DIR = "frame_eval_analysis_rgb_acc" # 出力先フォルダ名を変更
 MAX_OFFSET = 1
 CACHE_GT_SEARCH_PATH = "frames_QR"
-SUMMARY_CSV = "eval_summary.csv"
+SUMMARY_CSV = "eval_summary_accuracy.csv"  # CSVファイル名を変更
+
 DEFAULT_PREFIXES = ["ex", "nagaoka", "hocho", "rice"]
 DEFAULT_TARGETS = ["B", "G", "I", "R", "X"]
 DEFAULT_INDEXES = range(1, 5)
+
+# CSVヘッダー定義（Accuracyを追加）
 CSV_FIELDS = [
     "folder",
     "pair_count",
@@ -40,12 +45,16 @@ CSV_FIELDS = [
     "avg_precision",
     "max_precision",
     "min_precision",
+    "avg_accuracy",       # 追加: 平均正解率
+    "max_accuracy",       # 追加: 最大正解率
+    "min_accuracy",       # 追加: 最小正解率
     "avg_noise",
     "max_noise",
     "min_noise",
     "best_frame_1",
     "best_frame_2",
     "best_pair_recall",
+    "best_pair_accuracy", # 追加: ベストペアの正解率
     "best_pair_noise",
     "best_pair_score",
 ]
@@ -107,33 +116,36 @@ def get_roi_slice(img_shape, height_ratio=0.7):
     return slice(start_y, start_y + roi_h), slice(start_x, start_x + roi_w), (start_x, start_y, roi_w, roi_h)
 
 def calculate_metrics_roi(detected_mask, gt_mask, roi_slices):
-    """ROI内でのPrecisionとRecallを計算"""
+    """
+    ROI内での Precision, Recall, Accuracy を計算
+    Accuracy = (TP + TN) / (TP + FP + FN + TN)
+    """
     slice_y, slice_x, _ = roi_slices
     roi_detected = detected_mask[slice_y, slice_x]
     roi_gt = gt_mask[slice_y, slice_x]
     
+    # TP: 正解(True)を正しく検出(True)
     tp = np.count_nonzero(roi_detected & roi_gt)
+    # FP: 背景(False)を誤って検出(True)
     fp = np.count_nonzero(roi_detected & ~roi_gt)
+    # FN: 正解(True)を見逃した(False)
     fn = np.count_nonzero(~roi_detected & roi_gt)
+    # TN: 背景(False)を正しく背景(False)と判断
+    tn = np.count_nonzero(~roi_detected & ~roi_gt)
+    
+    total_pixels = tp + fp + fn + tn
     
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    # Recall (再現率): 正解データ(TP+FN)のうち、どれだけ検出(TP)できたか
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    accuracy = (tp + tn) / total_pixels if total_pixels > 0 else 0.0
     
-    return precision, recall
+    return precision, recall, accuracy
 
 def calculate_fpr_full(detected_mask, gt_mask):
-    """画像全体での誤検出率 (FPR) を計算"""
-    # 背景領域（正解が黒じゃない場所すべて）
+    """画像全体での誤検出率 (FPR) を計算 (Noise Metrics)"""
     bg_mask = ~gt_mask
-    
-    # 背景なのに検出してしまった画素 (False Positive)
     fp_full = np.count_nonzero(detected_mask & bg_mask)
-    
-    # 背景の総画素数 (True Negative + False Positive)
     tn_plus_fp = np.count_nonzero(bg_mask)
-    
-    # FPR: 背景全体のうち、何％を誤って黒と判定したか
     fpr = fp_full / tn_plus_fp if tn_plus_fp > 0 else 0.0
     return fpr
 
@@ -150,9 +162,11 @@ def save_evaluated_map(increased, decreased, roi_rect, scores, output_path):
     rect = patches.Rectangle((rx, ry), rw, rh, linewidth=2, edgecolor='r', facecolor='none')
     ax.add_patch(rect)
     
-    precision, recall, fpr = scores
+    # scores: (precision, recall, accuracy, fpr)
+    precision, recall, accuracy, fpr = scores
+    
     title_text = (f'RGB Analysis (Scale: {QUALITY_SCALE})\n'
-                  f'ROI Recall: {recall:.2%} | ROI Precision: {precision:.2%}\n'
+                  f'ROI Recall: {recall:.2%} | Precision: {precision:.2%} | Accuracy: {accuracy:.2%}\n'
                   f'Full Image Noise Rate (FPR): {fpr:.2%}')
     
     ax.set_title(title_text)
@@ -199,23 +213,36 @@ def build_candidate_pairs(image_paths: Sequence[Path]) -> List[Tuple[Path, Path]
 def summarize_pair_metrics(folder_name: str, pair_records: List[Dict[str, float]]) -> Dict[str, float]:
     recalls = np.array([record["recall"] for record in pair_records])
     precisions = np.array([record["precision"] for record in pair_records])
+    accuracies = np.array([record["accuracy"] for record in pair_records])
     noises = np.array([record["noise"] for record in pair_records])
+    
+    # スコア計算: Recall - Noise を基本とするが、必要に応じて Accuracy を考慮した選定ロジックに変更可能
     best_pair = max(pair_records, key=lambda record: record["recall"] - record["noise"])
+    
     return {
         "folder": folder_name,
         "pair_count": len(pair_records),
+        
         "avg_recall": float(recalls.mean()),
         "max_recall": float(recalls.max()),
         "min_recall": float(recalls.min()),
+        
         "avg_precision": float(precisions.mean()),
         "max_precision": float(precisions.max()),
         "min_precision": float(precisions.min()),
+        
+        "avg_accuracy": float(accuracies.mean()), # 追加
+        "max_accuracy": float(accuracies.max()),  # 追加
+        "min_accuracy": float(accuracies.min()),  # 追加
+
         "avg_noise": float(noises.mean()),
         "max_noise": float(noises.max()),
         "min_noise": float(noises.min()),
+        
         "best_frame_1": best_pair["frame1"],
         "best_frame_2": best_pair["frame2"],
         "best_pair_recall": best_pair["recall"],
+        "best_pair_accuracy": best_pair["accuracy"], # 追加
         "best_pair_noise": best_pair["noise"],
         "best_pair_score": best_pair["recall"] - best_pair["noise"],
     }
@@ -254,6 +281,7 @@ def evaluate_directory(target_dir: Path) -> Optional[Dict[str, float]]:
 
     pair_records: List[Dict[str, float]] = []
     print(f"{target_dir.name}: {len(candidate_pairs)}ペアを処理開始...")
+    
     for idx, (path1, path2) in enumerate(candidate_pairs, start=1):
         img1 = get_image(path1)
         img2 = get_image(path2)
@@ -262,22 +290,28 @@ def evaluate_directory(target_dir: Path) -> Optional[Dict[str, float]]:
 
         increased, decreased = classify_rgb_change(img1, img2, THRESHOLD)
         detected_mask = increased | decreased
-        precision, recall = calculate_metrics_roi(detected_mask, gt_mask, roi_slices)
+        
+        # 指標計算 (Accuracy 追加)
+        precision, recall, accuracy = calculate_metrics_roi(detected_mask, gt_mask, roi_slices)
         fpr = calculate_fpr_full(detected_mask, gt_mask)
 
         pair_name = build_pair_folder_name(path1, path2)
-        filename = f"{pair_name}_R{int(recall*100)}_P{int(precision*100)}_N{int(fpr*100)}.png"
+        # ファイル名に Accuracy (A) を追加
+        filename = f"{pair_name}_R{int(recall*100)}_P{int(precision*100)}_A{int(accuracy*100)}_N{int(fpr*100)}.png"
         output_path = output_dir / filename
-        save_evaluated_map(increased, decreased, roi_slices[2], (precision, recall, fpr), output_path)
+        
+        save_evaluated_map(increased, decreased, roi_slices[2], (precision, recall, accuracy, fpr), output_path)
 
         pair_records.append({
             "frame1": path1.name,
             "frame2": path2.name,
             "recall": recall,
             "precision": precision,
+            "accuracy": accuracy, # 追加
             "noise": fpr,
         })
-        print(f"[{idx}/{len(candidate_pairs)}] {pair_name} -> Recall: {recall:.1%}, Precision: {precision:.1%}, Noise(FPR): {fpr:.2%}")
+        print(f"[{idx}/{len(candidate_pairs)}] {pair_name} -> "
+              f"Recall: {recall:.1%}, Precision: {precision:.1%}, Accuracy: {accuracy:.1%}, Noise: {fpr:.2%}")
 
     summary = summarize_pair_metrics(target_dir.name, pair_records)
     print(f"完了: {target_dir.name} -> ペア数 {summary['pair_count']}")
@@ -296,8 +330,8 @@ def write_summary_csv(records: List[Dict[str, float]], csv_path: Path) -> None:
             writer.writerow({field: format_value(record.get(field)) for field in CSV_FIELDS})
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="RGB差分評価とCSV集計ツール")
-    parser.add_argument("--dirs", nargs="*", help="解析対象ディレクトリ（指定が無い場合は既定の {prefix}_{target}{idx} 全てを探索）")
+    parser = argparse.ArgumentParser(description="RGB差分評価とCSV集計ツール (Accuracy対応)")
+    parser.add_argument("--dirs", nargs="*", help="解析対象ディレクトリ")
     parser.add_argument("--csv", default=SUMMARY_CSV, help="CSV出力ファイル名")
     return parser.parse_args()
 
@@ -340,7 +374,7 @@ def main():
     if summaries:
         csv_path = base_dir / args.csv
         write_summary_csv(summaries, csv_path)
-        print(f"CSV出力: {csv_path}")
+        print(f"CSV出力完了: {csv_path}")
     else:
         print("有効な解析結果が得られませんでした。")
 
