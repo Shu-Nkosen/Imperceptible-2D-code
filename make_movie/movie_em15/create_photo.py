@@ -3,11 +3,11 @@ import numpy as np
 import os
 
 # ======= パラメータ設定 =======
-XX = 100
+XX = 6
 # 変化させるRGB量
 BRIGHTNESS_DECREASE_POS = XX  # 暗くする量
 BRIGHTNESS_DECREASE_NEG = -XX # 明るくする量
-PRE_CLIP_MARGIN = 4           # 事前クリップマージン
+PRE_CLIP_MARGIN = XX           # 事前クリップマージン
 # ==============================
 
 def prepare_processing_context(image_path, qr_path, clip_margin):

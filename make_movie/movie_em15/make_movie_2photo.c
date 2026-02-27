@@ -19,6 +19,10 @@
 #define INTERVAL 1
 #endif
 
+#ifndef CLIP_MARGIN
+#define CLIP_MARGIN 6
+#endif
+
 // COLOR はトークンで持つ（X, I, R, G, B など）
 #ifndef COLOR
 #define COLOR X
@@ -62,7 +66,7 @@ GLuint orig_texture = 0;
 GLuint texture_sequence[10];  // 最大10パターン
 
 // 画像読み込み
-GLuint load_texture(const char* filename) {
+GLuint load_texture(const char* filename, int clip_margin, int clip_enabled) {
     
     printf("[DEBUG] Attempting to load texture: %s\n", filename);
 
@@ -76,6 +80,17 @@ GLuint load_texture(const char* filename) {
 
     printf("[DEBUG] stbi_load success: %s (width=%d, height=%d, channels=%d)\n",
            filename, width, height, channels);
+
+    if (clip_enabled && clip_margin > 0) {
+        const int upper = 255 - clip_margin;
+        const int total = width * height * channels;
+        for (int i = 0; i < total; i++) {
+            int v = data[i];
+            if (v < clip_margin) v = clip_margin;
+            else if (v > upper) v = upper;
+            data[i] = (unsigned char)v;
+        }
+    }
     
     GLuint texture_id;
     glGenTextures(1, &texture_id);
@@ -165,13 +180,17 @@ int main() {
     
     snprintf(filename, sizeof(filename), "%s_%d_normal%s.png", 
              base_name,  BRIGHTNESS_DECREASE, STR(COLOR));
-    normal_texture = load_texture(filename);
+    normal_texture = load_texture(filename, CLIP_MARGIN, 0);
     
     snprintf(filename, sizeof(filename), "%s_%d_inv%s.png", 
              base_name, BRIGHTNESS_DECREASE, STR(COLOR));
-    inv_texture = load_texture(filename);
+    inv_texture = load_texture(filename, CLIP_MARGIN, 0);
+    
+    snprintf(filename, sizeof(filename), "%s.png", base_name);
+    orig_texture = load_texture(filename, CLIP_MARGIN, 1);
     
     // テクスチャシーケンス生成
+
     int is_normal = 1;
     int seq_len = 0;
     for (int i = 0; i < num_patterns; i++) {

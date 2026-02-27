@@ -3,11 +3,11 @@ import numpy as np
 import os
 
 # ======= パラメータ設定 =======
-XX = 100
+XX = 14
 # 変化させるRGB量
 BRIGHTNESS_DECREASE_POS = XX  # 黒部分の輝度減少量（normal）
 BRIGHTNESS_DECREASE_NEG = -XX # 黒部分の輝度増加量（inv）
-PRE_CLIP_MARGIN = 4           # 事前クリップマージン
+PRE_CLIP_MARGIN = XX           # 事前クリップマージン
 # ==============================
 
 def adjust_brightness_by_qr(image_path, qr_path, bright_decrease, clip_margin, invert=False, output_suffix=""):
