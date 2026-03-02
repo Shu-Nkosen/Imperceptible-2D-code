@@ -1,5 +1,8 @@
 // 実行方法
-// gcc make_movie_2photo.c   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include"  -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib"   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_2photo.exe
+// gcc make_movie_2photo.c -DCLIP_MARGIN=14 \
+//   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include" \
+//   -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib" \
+//   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_2photo.exe
 
 #include <GLFW/glfw3.h>
 #include <stdio.h>
@@ -62,7 +65,6 @@ int num_patterns = 2;
 // テクスチャID格納
 GLuint normal_texture = 0;
 GLuint inv_texture = 0;
-GLuint orig_texture = 0;
 GLuint texture_sequence[10];  // 最大10パターン
 
 // 画像読み込み
@@ -186,9 +188,6 @@ int main() {
              base_name, BRIGHTNESS_DECREASE, STR(COLOR));
     inv_texture = load_texture(filename, CLIP_MARGIN, 0);
     
-    snprintf(filename, sizeof(filename), "%s.png", base_name);
-    orig_texture = load_texture(filename, CLIP_MARGIN, 1);
-    
     // テクスチャシーケンス生成
 
     int is_normal = 1;
@@ -197,8 +196,6 @@ int main() {
         if (frame_durations[i] == 1) {
             texture_sequence[seq_len++] = is_normal ? normal_texture : inv_texture;
             is_normal = !is_normal;
-        } else {
-            texture_sequence[seq_len++] = orig_texture;
         }
     }
     
@@ -257,7 +254,6 @@ int main() {
     // クリーンアップ
     glDeleteTextures(1, &normal_texture);
     glDeleteTextures(1, &inv_texture);
-    glDeleteTextures(1, &orig_texture);
     
     glfwDestroyWindow(window);
     glfwTerminate();

@@ -19,6 +19,7 @@ def prepare_processing_context(image_path, qr_path, clip_margin):
 
     # 入力画像をフルHD(1920x1080)に揃えて処理
     image = cv2.resize(image, (1920, 1080), interpolation=cv2.INTER_AREA)
+    image = image.astype(np.float32)
 
     img_h, img_w = image.shape[:2]
     square_size = img_h
@@ -28,9 +29,10 @@ def prepare_processing_context(image_path, qr_path, clip_margin):
     _, qr_binary = cv2.threshold(qr_resized, 127, 255, cv2.THRESH_BINARY)
     black_mask = qr_binary == 0
 
-    square_region = image[:, x_offset:x_offset+square_size, :].astype(np.float32)
     if clip_margin > 0:
-        square_region = np.clip(square_region, clip_margin, 255.0 - clip_margin)
+        image = np.clip(image, clip_margin, 255.0 - clip_margin)
+
+    square_region = image[:, x_offset:x_offset+square_size, :].copy()
 
     # 同一パラメータのnormal/invで同じチャネルを再利用できるようにインデックスをキャッシュ
     target_indices = {

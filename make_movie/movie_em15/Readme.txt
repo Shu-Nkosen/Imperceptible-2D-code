@@ -1,6 +1,6 @@
 exe大量作成コマンド
 
-2,4,6,8
+2photo
 
 & {
   $src = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/make_movie/movie_em15/make_movie_4photo.c"
@@ -23,6 +23,7 @@ exe大量作成コマンド
           "-DSELECTED_IMAGE=$($idx)",
           "-DBRIGHTNESS_DECREASE=$($d)",
           "-DCOLOR=$($c)",
+          "-DCLIP_MARGIN=$($d)",
           "-I$inc", "-L$lib",
           "-lglfw3dll", "-lwinmm", "-lopengl32", "-lgdi32", "-luser32",
           "-o", $out
@@ -32,6 +33,8 @@ exe大量作成コマンド
     }
   }
 }
+
+4photo
 
 & {
   $src = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/make_movie/movie_em15/make_movie_2photo.c"
@@ -54,6 +57,7 @@ exe大量作成コマンド
           "-DSELECTED_IMAGE=$($idx)",
           "-DBRIGHTNESS_DECREASE=$($d)",
           "-DCOLOR=$($c)",
+          "-DCLIP_MARGIN=$($d)",
           "-I$inc", "-L$lib",
           "-lglfw3dll", "-lwinmm", "-lopengl32", "-lgdi32", "-luser32",
           "-o", $out
@@ -88,6 +92,7 @@ exe大量作成コマンド
           "-DSELECTED_IMAGE=$($idx)",
           "-DBRIGHTNESS_DECREASE=$($d)",
           "-DCOLOR=$($c)",
+          "-DCLIP_MARGIN=$($d)",
           "-I$inc", "-L$lib",
           "-lglfw3dll", "-lwinmm", "-lopengl32", "-lgdi32", "-luser32",
           "-o", $out
