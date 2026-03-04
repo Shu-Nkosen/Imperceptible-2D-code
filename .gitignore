@@ -31,6 +31,10 @@ make_movie/1231/*.png
 make_movie/1231/*/*.png
 make_movie/1231/*/*/*.png
 make_movie/1231/*.mp4
+make_movie/0227/*/*.png
+make_movie/0227/*/*/*.png
+make_movie/02272/*/*.png
+make_movie/02272/*/*/*.png
 
 
 make_movie/movie_em1/*.png
