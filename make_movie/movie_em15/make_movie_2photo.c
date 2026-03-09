@@ -1,12 +1,14 @@
 // 実行方法
-// gcc make_movie_2photo.c -DCLIP_MARGIN=14 \
-//   -I"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\include" \
-//   -L"c:\Users\visulab\shu_kondo\Imperceptible-2D-code\vcpkg\installed\x64-mingw-dynamic\lib" \
+// (このファイルがある make_movie/movie_em15 で実行)
+// gcc make_movie_2photo.c -DCLIP_MARGIN=10 \
+//   -I"../../vcpkg/installed/x64-mingw-dynamic/include" \
+//   -L"../../vcpkg/installed/x64-mingw-dynamic/lib" \
 //   -lglfw3dll -lwinmm -lopengl32 -lgdi32 -luser32 -o make_movie_2photo.exe
 
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <windows.h>
 #include <time.h>
 #include <direct.h> 
@@ -15,7 +17,7 @@
 #endif
 
 #ifndef BRIGHTNESS_DECREASE
-#define BRIGHTNESS_DECREASE 2
+#define BRIGHTNESS_DECREASE 10
 #endif
 
 #ifndef INTERVAL
@@ -23,7 +25,11 @@
 #endif
 
 #ifndef CLIP_MARGIN
-#define CLIP_MARGIN 6
+#define CLIP_MARGIN 10
+#endif
+
+#ifndef FRAME_REPEAT
+#define FRAME_REPEAT 1
 #endif
 
 // COLOR はトークンで持つ（X, I, R, G, B など）
@@ -59,7 +65,7 @@ const char* base_image_names[] = {
 };
 
 // 表示パターン
-int frame_durations[] = { 1, 1};  // 各パターンのフレーム数
+int frame_durations[] = { FRAME_REPEAT, FRAME_REPEAT };  // 各パターンのフレーム数
 int num_patterns = 2;
 
 // テクスチャID格納
@@ -140,6 +146,24 @@ double get_time_ms() {
     return (counter.QuadPart * 1000.0) / frequency.QuadPart;
 }
 
+// 実行中exeのファイル名のみを返す
+const char* get_exe_filename(char* out, size_t out_size) {
+    DWORD n = GetModuleFileNameA(NULL, out, (DWORD)out_size);
+    if (n == 0 || n >= out_size) {
+        snprintf(out, out_size, "make_movie_2photo.exe");
+        return out;
+    }
+    const char* last_slash = strrchr(out, '\\');
+    const char* last_alt = strrchr(out, '/');
+    const char* base = out;
+    if (last_slash && (!last_alt || last_slash > last_alt)) base = last_slash + 1;
+    else if (last_alt) base = last_alt + 1;
+    if (base != out) {
+        memmove(out, base, strlen(base) + 1);
+    }
+    return out;
+}
+
 int main() {
     // Windowsタイマー精度を1msに設定
     print_current_directory();
@@ -148,6 +172,10 @@ int main() {
     LARGE_INTEGER qpc_frequency;
     QueryPerformanceFrequency(&qpc_frequency);
     const double qpc_to_ms = 1000.0 / (double)qpc_frequency.QuadPart;
+    const char* base_name = base_image_names[SELECTED_IMAGE];
+
+    char window_title[256];
+    get_exe_filename(window_title, sizeof(window_title));
     
     // GLFW初期化
     if (!glfwInit()) {
@@ -160,7 +188,7 @@ int main() {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     glfwWindowHint(GLFW_MAXIMIZED, GLFW_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(1920, 1080, "Image Flicker (C)", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1920, 1080, window_title, NULL, NULL);
     if (!window) {
         glfwTerminate();
         return -1;
@@ -178,7 +206,6 @@ int main() {
     
     // 画像読み込み
     char filename[256];
-    const char* base_name = base_image_names[SELECTED_IMAGE];
     
     snprintf(filename, sizeof(filename), "%s_%d_normal%s.png", 
              base_name,  BRIGHTNESS_DECREASE, STR(COLOR));
@@ -187,16 +214,30 @@ int main() {
     snprintf(filename, sizeof(filename), "%s_%d_inv%s.png", 
              base_name, BRIGHTNESS_DECREASE, STR(COLOR));
     inv_texture = load_texture(filename, CLIP_MARGIN, 0);
+
+    if (normal_texture == 0 || inv_texture == 0) {
+        fprintf(stderr, "Failed to load textures. normal=%u inv=%u\n", normal_texture, inv_texture);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        timeEndPeriod(1);
+        return -1;
+    }
     
     // テクスチャシーケンス生成
 
     int is_normal = 1;
     int seq_len = 0;
     for (int i = 0; i < num_patterns; i++) {
-        if (frame_durations[i] == 1) {
-            texture_sequence[seq_len++] = is_normal ? normal_texture : inv_texture;
-            is_normal = !is_normal;
-        }
+        texture_sequence[seq_len++] = is_normal ? normal_texture : inv_texture;
+        is_normal = !is_normal;
+    }
+
+    if (seq_len <= 0) {
+        fprintf(stderr, "Invalid texture sequence length: %d\n", seq_len);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        timeEndPeriod(1);
+        return -1;
     }
     
     printf("Starting render loop...\n");
