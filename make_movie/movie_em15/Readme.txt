@@ -3,21 +3,21 @@ exe大量作成コマンド
 2photo
 
 & {
-  $src = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/make_movie/movie_em15/make_movie_4photo.c"
+  $src = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/make_movie/movie_em15/make_movie_2photo.c"
   $inc = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/vcpkg/installed/x64-mingw-dynamic/include"
   $lib = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/vcpkg/installed/x64-mingw-dynamic/lib"
 
   $idxMap = @{ ex=4; nagaoka=2; hocho=0; rice=3 }
   $bases  = @("ex","nagaoka","hocho","rice")
   $colors = @("R","G","B","I","X")
-  $decs   = @(6, 10, 14)
+  $decs   = @(2, 4, 6, 8, 10)
   $clip = @($decs)
 
   foreach ($b in $bases) {
     $idx = $idxMap[$b]
     foreach ($c in $colors) {
       foreach ($d in $decs) {
-        $out = "4photo${b}_${c}${d}.exe"
+        $out = "${b}_${c}${d}.exe"
         $args = @(
           $src,
           "-DSELECTED_IMAGE=$($idx)",
@@ -36,22 +36,24 @@ exe大量作成コマンド
 
 4photo
 
+  $decs   = @(6, 10, 14)
+
 & {
-  $src = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/make_movie/movie_em15/make_movie_2photo.c"
+  $src = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/make_movie/movie_em15/make_movie_4photo.c"
   $inc = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/vcpkg/installed/x64-mingw-dynamic/include"
   $lib = "C:/Users/visulab/shu_kondo/Imperceptible-2D-code/vcpkg/installed/x64-mingw-dynamic/lib"
 
   $idxMap = @{ ex=4; nagaoka=2; hocho=0; rice=3 }
   $bases  = @("ex","nagaoka","hocho","rice")
   $colors = @("R","G","B","I","X")
-  $decs   = @(6, 10, 14)
+  $decs   = 2..10
   $clip = @($decs)
   
   foreach ($b in $bases) {
     $idx = $idxMap[$b]
     foreach ($c in $colors) {
       foreach ($d in $decs) {
-        $out = "${b}_${c}${d}.exe"
+        $out = "$4photo{b}_${c}${d}.exe"
         $args = @(
           $src,
           "-DSELECTED_IMAGE=$($idx)",
