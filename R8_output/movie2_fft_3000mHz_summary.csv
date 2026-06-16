@@ -1,0 +1,2 @@
+fps,total_frames,used_frames,target_freq,target_idx,freq_at_target,band_radius,threshold,mask_pixels
+59.840978,299,299,30.000000,149,29.820421,1,12.000000,0
