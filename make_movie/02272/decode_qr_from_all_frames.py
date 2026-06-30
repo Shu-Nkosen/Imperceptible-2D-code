@@ -1,0 +1,746 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import re
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional, Tuple
+
+import cv2
+import numpy as np
+
+INPUT_CSV = Path("eval_summary_accuracy.csv")
+OUTPUT_CSV = Path("qr_decode_all_frames.csv")
+DIFF_SUBDIR = "rgb_max_diff_maps"
+SCALE_TAG = "rgbmax_scale1.00"
+ANALYSIS_DIR = Path("median_eval_analysis_all_frames")
+GT_IMAGE_PATH = "frame_QR.png"
+CACHE_GT_SEARCH_PATH = "frame_QR"
+GT_BLACK_THRESHOLD = 0.2
+ROI_HEIGHT_RATIO = 0.7
+DEFAULT_MEDIAN_KERNEL = 5
+DEFAULT_MEDIAN_ITERATIONS = 1
+_GT_CACHE: Dict[str, Tuple[Optional[np.ndarray], Optional[Tuple[slice, slice, Tuple[int, int, int, int]]]]] = {}
+FAST_VARIANT_ORDER = (
+    "median_gray",
+    "gray",
+    "median_otsu",
+    "otsu",
+    "otsu_close",
+    "median_otsu_close",
+)
+FULL_VARIANT_ORDER = FAST_VARIANT_ORDER + (
+    "otsu_inv",
+    "median_otsu_inv",
+    "adaptive",
+    "median_adaptive",
+)
+FAST_SCALES = (1.0,)
+FULL_SCALES = (1.0, 2.0, 3.0)
+
+
+def parse_kernel_list(text: str) -> List[int]:
+    kernels: List[int] = []
+    for chunk in text.split(","):
+        value = chunk.strip()
+        if not value:
+            continue
+        kernel = abs(int(value))
+        if kernel == 0:
+            continue
+        if kernel % 2 == 0:
+            kernel += 1
+        kernels.append(kernel)
+
+    unique: List[int] = []
+    seen = set()
+    for kernel in kernels:
+        if kernel not in seen:
+            seen.add(kernel)
+            unique.append(kernel)
+    return unique
+
+
+def sanitize_filename(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", value)
+
+
+def parse_diff_pair_indices(path: Path) -> Optional[Tuple[int, int]]:
+    match = re.match(r"(\d+)-(\d+)-", path.stem)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def extract_frame_index(frame_name: str) -> Optional[int]:
+    match = re.search(r"(\d+)", frame_name)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def resolve_diff_image_path(folder_dir: Path, frame1: str, frame2: str) -> Tuple[Optional[Path], str]:
+    idx1 = extract_frame_index(frame1)
+    idx2 = extract_frame_index(frame2)
+    if idx1 is None or idx2 is None:
+        return None, "frame番号抽出に失敗"
+
+    left, right = sorted((idx1, idx2))
+    diff_dir = folder_dir / DIFF_SUBDIR
+    if not diff_dir.exists():
+        return None, f"差分ディレクトリなし: {DIFF_SUBDIR}"
+
+    expected = diff_dir / f"{left:05d}-{right:05d}-FRAME_{SCALE_TAG}.png"
+    if expected.exists():
+        return expected, ""
+
+    candidates = sorted(diff_dir.glob(f"{left:05d}-{right:05d}-*_rgbmax_scale*.png"))
+    if not candidates:
+        return None, "対応する差分画像が見つからない"
+
+    return candidates[0], ""
+
+
+def resolve_gt_path(target_dir: Path) -> Path:
+    candidates = [
+        target_dir / GT_IMAGE_PATH,
+        target_dir.parent / GT_IMAGE_PATH,
+        target_dir.parent / CACHE_GT_SEARCH_PATH / GT_IMAGE_PATH,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"{GT_IMAGE_PATH} が見つかりません")
+
+
+def get_roi_slice(
+    img_shape: Tuple[int, int],
+    height_ratio: float = ROI_HEIGHT_RATIO,
+) -> Tuple[slice, slice, Tuple[int, int, int, int]]:
+    h, w = img_shape
+    roi_h = int(h * height_ratio)
+    roi_w = roi_h
+    start_y = max(0, (h - roi_h) // 2)
+    start_x = max(0, (w - roi_w) // 2)
+    return slice(start_y, start_y + roi_h), slice(start_x, start_x + roi_w), (start_x, start_y, roi_w, roi_h)
+
+
+def load_folder_gt(gt_path: Path) -> Tuple[Optional[np.ndarray], Optional[Tuple[slice, slice, Tuple[int, int, int, int]]]]:
+    cache_key = str(gt_path.resolve())
+    if cache_key in _GT_CACHE:
+        return _GT_CACHE[cache_key]
+
+    gt_img = cv2.imread(str(gt_path), cv2.IMREAD_GRAYSCALE)
+    if gt_img is None:
+        _GT_CACHE[cache_key] = (None, None)
+        return None, None
+
+    gt_mask = (gt_img.astype(np.float32) / 255.0) <= GT_BLACK_THRESHOLD
+    roi_slices = get_roi_slice(gt_mask.shape)
+    _GT_CACHE[cache_key] = (gt_mask, roi_slices)
+    return gt_mask, roi_slices
+
+
+def calculate_metrics_roi(
+    detected_mask: np.ndarray,
+    gt_mask: np.ndarray,
+    roi_slices: Tuple[slice, slice, Tuple[int, int, int, int]],
+) -> Tuple[float, float, float]:
+    slice_y, slice_x, _ = roi_slices
+    roi_detected = detected_mask[slice_y, slice_x]
+    roi_gt = gt_mask[slice_y, slice_x]
+
+    tp = int(np.count_nonzero(roi_detected & roi_gt))
+    fp = int(np.count_nonzero(roi_detected & ~roi_gt))
+    fn = int(np.count_nonzero(~roi_detected & roi_gt))
+    tn = int(np.count_nonzero(~roi_detected & ~roi_gt))
+    total_pixels = tp + fp + fn + tn
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    accuracy = (tp + tn) / total_pixels if total_pixels > 0 else 0.0
+    return precision, recall, accuracy
+
+
+def calculate_fpr_full(detected_mask: np.ndarray, gt_mask: np.ndarray) -> float:
+    bg_mask = ~gt_mask
+    fp_full = int(np.count_nonzero(detected_mask & bg_mask))
+    tn_plus_fp = int(np.count_nonzero(bg_mask))
+    return fp_full / tn_plus_fp if tn_plus_fp > 0 else 0.0
+
+
+def align_image_to_gt(gray: np.ndarray, gt_shape: Tuple[int, int]) -> np.ndarray:
+    if gray.shape[:2] == gt_shape:
+        return gray
+    return cv2.resize(gray, (gt_shape[1], gt_shape[0]), interpolation=cv2.INTER_NEAREST)
+
+
+def image_to_detected_mask(
+    gray: np.ndarray,
+    gt_mask: np.ndarray,
+    roi_slices: Tuple[slice, slice, Tuple[int, int, int, int]],
+) -> np.ndarray:
+    aligned = align_image_to_gt(gray, gt_mask.shape)
+    dark_mask = aligned < 128
+    light_mask = ~dark_mask
+    _, _, acc_dark = calculate_metrics_roi(dark_mask, gt_mask, roi_slices)
+    _, _, acc_light = calculate_metrics_roi(light_mask, gt_mask, roi_slices)
+    return dark_mask if acc_dark >= acc_light else light_mask
+
+
+def compare_with_gt(
+    used_img: Optional[np.ndarray],
+    gt_path_str: str,
+) -> Tuple[str, str, str, str, str]:
+    if not gt_path_str:
+        return "", "", "", "", "正解画像なし"
+
+    gt_mask, roi_slices = load_folder_gt(Path(gt_path_str))
+    if gt_mask is None or roi_slices is None:
+        return "", "", "", "", "正解画像読み込み失敗"
+    if used_img is None:
+        return "", "", "", "", "比較対象画像なし"
+
+    detected_mask = image_to_detected_mask(used_img, gt_mask, roi_slices)
+    precision, recall, accuracy = calculate_metrics_roi(detected_mask, gt_mask, roi_slices)
+    noise = calculate_fpr_full(detected_mask, gt_mask)
+    return (
+        f"{recall:.6f}",
+        f"{precision:.6f}",
+        f"{accuracy:.6f}",
+        f"{noise:.6f}",
+        "",
+    )
+
+
+def empty_gt_metrics() -> Dict[str, str]:
+    return {
+        "recall": "",
+        "precision": "",
+        "accuracy": "",
+        "noise": "",
+        "gt_note": "",
+    }
+
+
+def collect_all_diff_paths(folder_dir: Path) -> Tuple[List[Path], str]:
+    diff_dir = folder_dir / DIFF_SUBDIR
+    if not diff_dir.exists():
+        return [], f"差分ディレクトリなし: {DIFF_SUBDIR}"
+
+    paths = sorted(diff_dir.glob("*_rgbmax_scale*.png"))
+    if not paths:
+        return [], "差分画像が見つからない"
+
+    def sort_key(path: Path):
+        pair = parse_diff_pair_indices(path)
+        if pair is None:
+            return (1, 10**9, 10**9, path.name)
+        left, right = pair
+        return (0, left, right, path.name)
+
+    return sorted(paths, key=sort_key), ""
+
+
+def apply_median_filter(gray: np.ndarray, kernel_size: int, iterations: int) -> np.ndarray:
+    size = max(1, int(kernel_size))
+    if size % 2 == 0:
+        size += 1
+    iters = max(0, int(iterations))
+
+    filtered = gray.copy()
+    if size < 3 or iters == 0:
+        return filtered
+
+    for _ in range(iters):
+        filtered = cv2.medianBlur(filtered, size)
+    return filtered
+
+
+class VariantCache:
+    def __init__(self, gray: np.ndarray, median_gray: np.ndarray) -> None:
+        self.gray = gray
+        self.median_gray = median_gray
+        self._cache: Dict[str, np.ndarray] = {}
+
+    def get(self, name: str) -> np.ndarray:
+        cached = self._cache.get(name)
+        if cached is not None:
+            return cached
+
+        if name == "gray":
+            image = self.gray
+        elif name == "median_gray":
+            image = self.median_gray
+        elif name == "otsu":
+            _, image = cv2.threshold(self.gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif name == "median_otsu":
+            _, image = cv2.threshold(self.median_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif name == "otsu_inv":
+            _, image = cv2.threshold(self.gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        elif name == "median_otsu_inv":
+            _, image = cv2.threshold(self.median_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        elif name == "adaptive":
+            image = cv2.adaptiveThreshold(
+                self.gray,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                31,
+                2,
+            )
+        elif name == "median_adaptive":
+            image = cv2.adaptiveThreshold(
+                self.median_gray,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                31,
+                2,
+            )
+        elif name == "otsu_close":
+            otsu = self.get("otsu")
+            kernel = np.ones((3, 3), np.uint8)
+            image = cv2.morphologyEx(otsu, cv2.MORPH_CLOSE, kernel, iterations=1)
+        elif name == "median_otsu_close":
+            median_otsu = self.get("median_otsu")
+            kernel = np.ones((3, 3), np.uint8)
+            image = cv2.morphologyEx(median_otsu, cv2.MORPH_CLOSE, kernel, iterations=1)
+        else:
+            raise KeyError(f"unknown variant: {name}")
+
+        self._cache[name] = image
+        return image
+
+
+def iter_variant_targets(
+    gray: np.ndarray,
+    median_gray: np.ndarray,
+    variant_order: Tuple[str, ...],
+    scales: Tuple[float, ...],
+) -> Iterator[Tuple[str, np.ndarray]]:
+    cache = VariantCache(gray, median_gray)
+    for variant_name in variant_order:
+        variant_img = cache.get(variant_name)
+        for scale in scales:
+            if scale == 1.0:
+                target = variant_img
+            else:
+                target = cv2.resize(
+                    variant_img,
+                    None,
+                    fx=scale,
+                    fy=scale,
+                    interpolation=cv2.INTER_NEAREST,
+                )
+            yield f"{variant_name}_x{scale:.1f}", target
+
+
+def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: bool) -> Optional[str]:
+    try:
+        ok, points = detector.detect(image)
+        if not ok or points is None:
+            if not allow_multi:
+                return None
+        else:
+            text, _ = detector.decode(image, points)
+            if text:
+                return text
+    except cv2.error:
+        if not allow_multi:
+            return None
+
+    if not allow_multi:
+        return None
+
+    try:
+        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image)
+        if retval and decoded_info:
+            for value in decoded_info:
+                if value:
+                    return value
+    except cv2.error:
+        pass
+
+    return None
+
+
+def decode_qr_from_diff(
+    diff_path: Path,
+    median_kernel: int,
+    median_iterations: int,
+    full_search: bool,
+) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
+    gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        return None, "画像読み込み失敗", None
+
+    median_gray = apply_median_filter(gray, median_kernel, median_iterations)
+    detector = cv2.QRCodeDetector()
+    last_target: Optional[np.ndarray] = None
+
+    variant_order = FULL_VARIANT_ORDER if full_search else FAST_VARIANT_ORDER
+    scales = FULL_SCALES if full_search else FAST_SCALES
+    allow_multi = full_search
+
+    for variant_tag, target in iter_variant_targets(gray, median_gray, variant_order, scales):
+        last_target = target
+        text = try_decode(detector, target, allow_multi=allow_multi)
+        if text:
+            return (
+                text,
+                f"{variant_tag}_k{median_kernel}_i{median_iterations}",
+                target,
+            )
+
+    return None, "decode失敗", last_target
+
+
+def decode_qr_with_kernel_candidates(
+    diff_path: Path,
+    kernel_candidates: List[int],
+    median_iterations: int,
+    full_search: bool,
+) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
+    last_target: Optional[np.ndarray] = None
+    for kernel in kernel_candidates:
+        text, method, used_img = decode_qr_from_diff(
+            diff_path,
+            kernel,
+            median_iterations,
+            full_search,
+        )
+        if used_img is not None:
+            last_target = used_img
+        if text:
+            return text, method, used_img
+    return None, "decode失敗", last_target
+
+
+def read_target_folders(base_dir: Path, input_csv: Path) -> List[Path]:
+    folders: List[Path] = []
+
+    if input_csv.exists():
+        with input_csv.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                folder_name = (row.get("folder") or "").strip()
+                if not folder_name:
+                    continue
+                folder_path = base_dir / folder_name
+                if folder_path.exists() and folder_path.is_dir():
+                    folders.append(folder_path)
+
+    if folders:
+        unique: List[Path] = []
+        seen = set()
+        for path in folders:
+            key = str(path.resolve())
+            if key not in seen:
+                seen.add(key)
+                unique.append(path)
+        return unique
+
+    return sorted(
+        [path for path in base_dir.iterdir() if path.is_dir() and (path / DIFF_SUBDIR).exists()],
+        key=lambda p: p.name,
+    )
+
+
+def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
+    diff_path = Path(str(task["diff_path"]))
+    kernel_candidates = [int(value) for value in task["kernel_candidates"]]
+    median_iterations = int(task["median_iterations"])
+    full_search = bool(task["full_search"])
+    gt_path_str = str(task.get("gt_path") or "")
+
+    decoded_text, method, used_img = decode_qr_with_kernel_candidates(
+        diff_path,
+        kernel_candidates,
+        median_iterations,
+        full_search,
+    )
+    ok = decoded_text is not None
+
+    used_img_bytes = None
+    if ok and used_img is not None:
+        ok_encode, encoded = cv2.imencode(".png", used_img)
+        if ok_encode:
+            used_img_bytes = encoded.tobytes()
+
+    recall, precision, accuracy, noise, gt_note = compare_with_gt(used_img, gt_path_str)
+
+    return {
+        "folder": str(task["folder"]),
+        "frame_1": str(task["frame_1"]),
+        "frame_2": str(task["frame_2"]),
+        "diff_image": str(task["diff_image"]),
+        "decoded_text": decoded_text or "",
+        "success": ok,
+        "method": method,
+        "note": "" if ok else "QR未検出",
+        "recall": recall,
+        "precision": precision,
+        "accuracy": accuracy,
+        "noise": noise,
+        "gt_note": gt_note,
+        "used_img_bytes": used_img_bytes,
+        "method_tag": sanitize_filename(method if method else "unknown"),
+        "diff_stem": diff_path.stem,
+    }
+
+
+def build_tasks(
+    target_folders: List[Path],
+    base_dir: Path,
+    kernel_candidates: List[int],
+    median_iterations: int,
+    full_search: bool,
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
+    tasks: List[Dict[str, object]] = []
+    pre_rows: List[Dict[str, object]] = []
+
+    for folder_dir in target_folders:
+        diff_paths, note = collect_all_diff_paths(folder_dir)
+        gt_path_str = ""
+        gt_note = ""
+        try:
+            gt_path_str = str(resolve_gt_path(folder_dir).resolve())
+        except FileNotFoundError as exc:
+            gt_note = str(exc)
+
+        if not diff_paths:
+            pre_rows.append(
+                {
+                    "folder": folder_dir.name,
+                    "frame_1": "",
+                    "frame_2": "",
+                    "diff_image": "",
+                    "analysis_image": "",
+                    "decoded_text": "",
+                    "success": 0,
+                    "method": "",
+                    "note": note,
+                    **empty_gt_metrics(),
+                    "gt_note": gt_note,
+                }
+            )
+            print(f"[NG] {folder_dir.name}: {note}")
+            continue
+
+        for diff_path in diff_paths:
+            pair = parse_diff_pair_indices(diff_path)
+            if pair is None:
+                pre_rows.append(
+                    {
+                        "folder": folder_dir.name,
+                        "frame_1": "",
+                        "frame_2": "",
+                        "diff_image": str(diff_path.relative_to(base_dir)),
+                        "analysis_image": "",
+                        "decoded_text": "",
+                        "success": 0,
+                        "method": "",
+                        "note": "差分画像名の解析に失敗",
+                        **empty_gt_metrics(),
+                        "gt_note": gt_note,
+                    }
+                )
+                continue
+
+            frame_left, frame_right = pair
+            tasks.append(
+                {
+                    "diff_path": str(diff_path.resolve()),
+                    "folder": folder_dir.name,
+                    "frame_1": f"frame_{frame_left:05d}.png",
+                    "frame_2": f"frame_{frame_right:05d}.png",
+                    "diff_image": str(diff_path.relative_to(base_dir)),
+                    "kernel_candidates": kernel_candidates,
+                    "median_iterations": median_iterations,
+                    "full_search": full_search,
+                    "gt_path": gt_path_str,
+                }
+            )
+
+    return tasks, pre_rows
+
+
+def finalize_result_row(
+    result: Dict[str, object],
+    base_dir: Path,
+    analysis_dir: Path,
+    save_analysis: bool,
+) -> Dict[str, object]:
+    analysis_image_rel = ""
+    if save_analysis and result["success"] and result.get("used_img_bytes"):
+        folder_analysis_dir = analysis_dir / str(result["folder"])
+        folder_analysis_dir.mkdir(parents=True, exist_ok=True)
+        analysis_image_name = (
+            f"{result['diff_stem']}_ok_{result['method_tag']}.png"
+        )
+        analysis_image_path = folder_analysis_dir / analysis_image_name
+        analysis_image_path.write_bytes(result["used_img_bytes"])
+        analysis_image_rel = str(analysis_image_path.relative_to(base_dir))
+
+    return {
+        "folder": result["folder"],
+        "frame_1": result["frame_1"],
+        "frame_2": result["frame_2"],
+        "diff_image": result["diff_image"],
+        "analysis_image": analysis_image_rel,
+        "decoded_text": result["decoded_text"],
+        "success": int(result["success"]),
+        "method": result["method"],
+        "note": result["note"],
+        "recall": result.get("recall", ""),
+        "precision": result.get("precision", ""),
+        "accuracy": result.get("accuracy", ""),
+        "noise": result.get("noise", ""),
+        "gt_note": result.get("gt_note", ""),
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="全フレーム差分画像からQR文字列を復元する")
+    parser.add_argument("--folder", type=str, default="", help="対象フォルダ名を1つに限定（例: ex_B6）")
+    parser.add_argument("--limit", type=int, default=0, help="先頭から処理するフォルダ数（0で全件）")
+    parser.add_argument(
+        "--median-kernel",
+        type=int,
+        default=DEFAULT_MEDIAN_KERNEL,
+        help="メディアンフィルタのカーネルサイズ（偶数指定時は+1）",
+    )
+    parser.add_argument(
+        "--median-kernels",
+        type=str,
+        default="",
+        help="カーネル総当たり（例: 3,5,7）。指定時は --median-kernel より優先",
+    )
+    parser.add_argument(
+        "--median-iterations",
+        type=int,
+        default=DEFAULT_MEDIAN_ITERATIONS,
+        help="メディアンフィルタ反復回数（0で無効）",
+    )
+    parser.add_argument(
+        "--full-search",
+        action="store_true",
+        help="全バリアント×全スケール×Multi decodeで徹底探索（遅い）",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="並列ワーカー数（1で従来の逐次処理）",
+    )
+    parser.add_argument(
+        "--no-save-analysis",
+        action="store_true",
+        help="成功時の解析画像を保存しない",
+    )
+    args = parser.parse_args()
+
+    median_kernel = max(1, args.median_kernel)
+    if median_kernel % 2 == 0:
+        median_kernel += 1
+    median_iterations = max(0, args.median_iterations)
+    kernel_candidates = parse_kernel_list(args.median_kernels) if args.median_kernels else [median_kernel]
+    if not kernel_candidates:
+        kernel_candidates = [median_kernel]
+    workers = max(1, args.workers)
+    save_analysis = not args.no_save_analysis
+
+    mode = "full-search" if args.full_search else "fast"
+    print(
+        f"[INFO] mode: {mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
+        f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers}"
+    )
+
+    base_dir = Path(__file__).resolve().parent
+    input_csv = base_dir / INPUT_CSV
+    output_csv = base_dir / OUTPUT_CSV
+    analysis_dir = base_dir / ANALYSIS_DIR
+    if save_analysis:
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+
+    target_folders = read_target_folders(base_dir, input_csv)
+    if args.folder:
+        target_folders = [path for path in target_folders if path.name == args.folder]
+    if args.limit > 0:
+        target_folders = target_folders[: args.limit]
+
+    if not target_folders:
+        raise FileNotFoundError("対象フォルダが見つかりません。--folder または入力CSVを確認してください。")
+
+    tasks, rows_out = build_tasks(
+        target_folders,
+        base_dir,
+        kernel_candidates,
+        median_iterations,
+        args.full_search,
+    )
+
+    total = len(tasks)
+    success = 0
+
+    if workers == 1:
+        for index, task in enumerate(tasks, start=1):
+            result = process_diff_task(task)
+            row = finalize_result_row(result, base_dir, analysis_dir, save_analysis)
+            rows_out.append(row)
+            if row["success"]:
+                success += 1
+                print(
+                    f"[OK] {row['folder']}: {row['frame_1']} / {row['frame_2']} -> {row['decoded_text']}"
+                )
+            elif index % 50 == 0 or index == total:
+                print(f"[INFO] progress: {index}/{total}")
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(process_diff_task, task) for task in tasks]
+            done = 0
+            for future in as_completed(futures):
+                result = future.result()
+                row = finalize_result_row(result, base_dir, analysis_dir, save_analysis)
+                rows_out.append(row)
+                done += 1
+                if row["success"]:
+                    success += 1
+                    print(
+                        f"[OK] {row['folder']}: {row['frame_1']} / {row['frame_2']} -> {row['decoded_text']}"
+                    )
+                elif done % 50 == 0 or done == total:
+                    print(f"[INFO] progress: {done}/{total}")
+
+    with output_csv.open("w", encoding="utf-8", newline="") as f:
+        fieldnames = [
+            "folder",
+            "frame_1",
+            "frame_2",
+            "diff_image",
+            "analysis_image",
+            "decoded_text",
+            "success",
+            "method",
+            "note",
+            "recall",
+            "precision",
+            "accuracy",
+            "noise",
+            "gt_note",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows_out)
+
+    print(f"\n==== 完了 ====")
+    print(f"総件数: {total}")
+    print(f"成功件数: {success}")
+    print(f"成功率: {success / total:.2%}" if total else "成功率: 0.00%")
+    print(f"出力CSV: {output_csv.resolve()}")
+
+
+if __name__ == "__main__":
+    main()
