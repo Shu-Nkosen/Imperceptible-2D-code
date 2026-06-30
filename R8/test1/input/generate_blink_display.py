@@ -1,4 +1,4 @@
-"""中央の正方形領域を周期的に点滅させる表示／動画生成スクリプト
+ """中央の正方形領域を周期的に点滅させる表示／動画生成スクリプト
 
 使い方例:
   python R8/generate_blink_display.py --freq 20 --fps 60 --duration 5 --outfile R8/blink20.mp4
