@@ -181,8 +181,9 @@ static void write_manifest(
 
 static void build_conditions(Condition* out, int* out_count) {
     int idx = 0;
-    for (int bi = 0; bi < BASE_IMAGE_COUNT; bi++) {
-        for (int ci = 0; ci < CHANNEL_COUNT; ci++) {
+    // Order: channel (outer) -> image (middle) -> intensity (inner)
+    for (int ci = 0; ci < CHANNEL_COUNT; ci++) {
+        for (int bi = 0; bi < BASE_IMAGE_COUNT; bi++) {
             for (int ii = 0; ii < INTENSITY_COUNT; ii++) {
                 out[idx].base_name = BASE_IMAGES[bi];
                 out[idx].channel = CHANNELS[ci];
