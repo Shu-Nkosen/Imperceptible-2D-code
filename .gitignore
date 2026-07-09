@@ -3,6 +3,19 @@ stable_diffusion/
 *.zip
 *.mp4
 *.exe
+
+## R8 generated assets (keep base images like rice.png tracked)
+R8/make_movie/*_*_normal*.png
+R8/make_movie/*_*_inv*.png
+R8/make_movie/slate_*.png
+R8/make_movie/manifests/
+
+
+
+
+
+
+
 make_movie/1022/*.png
 make_movie/frames2-ex-1/*.png
 make_movie/frames2-ex-1/frame_diff_analysis
