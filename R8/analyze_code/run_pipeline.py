@@ -33,7 +33,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--block-sec", type=float, default=6.0, help="block duration seconds")
     p.add_argument("--use-start-sec", type=float, default=2.0, help="within-block start sec to extract")
     p.add_argument("--use-end-sec", type=float, default=5.0, help="within-block end sec to extract (exclusive)")
-    p.add_argument("--slate-sec", type=float, default=0.5, help="slate black and slate red duration sec")
+    p.add_argument("--slate-sec", type=float, default=None, help="slate black and slate red duration sec (default: manifest or 0.5)")
+    p.add_argument("--padding-sec", type=float, default=None, help="black padding before/after sync slate sec (default: manifest or 5.0)")
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
     p.add_argument("--workers", type=int, default=1, help="passed to decode_qr_from_all_frames.py")
     p.add_argument("--full-search", action="store_true", help="passed to decode_qr_from_all_frames.py")
@@ -185,12 +186,19 @@ def main() -> None:
     out_root = base_out / (meta.stem if meta else video_path.stem)
     ensure_dir(out_root)
 
+    manifest = read_manifest(Path(ns.manifest).resolve()) if ns.manifest else {}
+
+    slate_sec = float(ns.slate_sec) if ns.slate_sec is not None else float(manifest.get("slate_sec", 0.5))
+    padding_sec = float(ns.padding_sec) if ns.padding_sec is not None else float(manifest.get("padding_sec", 5.0))
+    block_sec = float(ns.block_sec)
+
     cfg = SyncConfig()
     sync_frame, fps = detect_black_to_red_sync(video_path, cfg)
     print(f"[OK] SYNC at frame={sync_frame}, fps={fps:.4f}")
 
-    slate_frames = int(round(float(ns.slate_sec) * fps))
-    block_frames = int(round(float(ns.block_sec) * fps))
+    slate_frames = int(round(slate_sec * fps))
+    padding_frames = int(round(padding_sec * fps))
+    block_frames = int(round(block_sec * fps))
     use_start = int(round(float(ns.use_start_sec) * fps))
     use_end = int(round(float(ns.use_end_sec) * fps))
     if use_end <= use_start:
@@ -200,8 +208,12 @@ def main() -> None:
     if not cap.isOpened():
         raise FileNotFoundError(str(video_path))
 
-    # block 0 starts after the red slate duration (black and red are same slate_sec; sync is red onset)
-    block0 = sync_frame + slate_frames
+    # block 0 starts after red slate + post-padding (sync_frame = red onset)
+    block0 = sync_frame + slate_frames + padding_frames
+    print(
+        f"[INFO] block0={block0} (sync + slate {slate_frames} + padding {padding_frames}), "
+        f"slate_sec={slate_sec}, padding_sec={padding_sec}, block_sec={block_sec}"
+    )
 
     saved_blocks: List[Dict[str, Any]] = []
     for i in range(int(ns.conditions)):
@@ -239,7 +251,6 @@ def main() -> None:
     decoded_rows = load_decode_csv(decode_csv)
     decoded_by_folder = {r.get("folder", ""): r for r in decoded_rows if r.get("folder")}
 
-    manifest = read_manifest(Path(ns.manifest).resolve()) if ns.manifest else {}
     manifest_conds: Dict[int, Dict[str, Any]] = {}
     for item in manifest.get("conditions", []) if isinstance(manifest, dict) else []:
         try:
