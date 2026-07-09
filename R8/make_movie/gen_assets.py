@@ -42,7 +42,7 @@ def parse_int_list(values: str) -> list[int]:
 
 def parse_args() -> Args:
     p = argparse.ArgumentParser(description="R8 make_movie assets generator (normal/inv per channel/intensity)")
-    p.add_argument("--images", type=str, default="rice,kosen,nagaoka_fireworks,hocho,ex", help="base image names (no extension), comma-separated")
+    p.add_argument("--images", type=str, default="rice,nagaoka_fireworks,hocho,ex", help="base image names (no extension), comma-separated")
     p.add_argument("--intensities", type=str, default="4,8,12", help="intensities (e.g. 4,8,12)")
     p.add_argument("--channels", type=str, default="R,G,B,max,min", help="channels: R,G,B,max,min")
     p.add_argument("--clip-margin", type=int, default=4, help="pre-clip margin applied to all pixels/channels")

@@ -26,7 +26,8 @@ typedef struct {
     const char* base_name; // e.g. rice
 } Condition;
 
-static const char* BASE_IMAGES[] = { "rice", "kosen", "nagaoka_fireworks", "hocho" };
+// NOTE: keep in sync with available base images in R8/make_movie (*.png)
+static const char* BASE_IMAGES[] = { "rice", "nagaoka_fireworks", "hocho", "ex" };
 static const int BASE_IMAGE_COUNT = 4;
 static const int INTENSITIES[] = { 4, 8, 12 };
 static const int INTENSITY_COUNT = 3;
@@ -129,6 +130,26 @@ static void write_manifest(
     int cond_count
 ) {
     if (!out_path || strlen(out_path) == 0) return;
+
+    // Create parent directories if needed.
+    // Example: "manifests\\r180_e250.json"
+    // This is a minimal recursive mkdir implementation for Windows paths.
+    {
+        char tmp[MAX_PATH];
+        strncpy(tmp, out_path, sizeof(tmp) - 1);
+        tmp[sizeof(tmp) - 1] = '\0';
+        for (char* p = tmp; *p; p++) {
+            if (*p == '/' || *p == '\\') {
+                char saved = *p;
+                *p = '\0';
+                if (strlen(tmp) > 0) {
+                    CreateDirectoryA(tmp, NULL);
+                }
+                *p = saved;
+            }
+        }
+    }
+
     FILE* f = fopen(out_path, "wb");
     if (!f) {
         printf("[WARN] cannot write manifest: %s\\n", out_path);

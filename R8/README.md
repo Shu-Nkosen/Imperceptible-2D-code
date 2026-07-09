@@ -15,7 +15,7 @@
 `R8/make_movie` 内で実行します。事前に `ex.png` などのベース画像と `HP_QR.png` が必要です。
 
 ```bash
-python R8/make_movie/gen_assets.py --images rice,kosen,nagaoka_fireworks,hocho --intensities 4,8,12 --channels R,G,B,max,min --clip-margin 4
+python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 4,8,12 --channels R,G,B,max,min --clip-margin 12
 ```
 
 生成される主なファイル（例）:
@@ -40,7 +40,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 事前に **Windowsのディスプレイ設定でリフレッシュレートを target Hz に設定**してから実行します（特に120Hz）。
 
 ```powershell
-.\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --repeat 1 --out-manifest ..\make_movie\manifests\r180_e250.json
+.\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --repeat 1 --out-manifest manifests\r180_e250.json
 ```
 
 - `--interval`: vsyncの間引き（例: 180Hzモニタで 90Hz相当なら `--interval 2`）
