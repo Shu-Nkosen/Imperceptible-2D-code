@@ -40,22 +40,26 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 事前に **Windowsのディスプレイ設定でリフレッシュレートを target Hz に設定**してから実行します（特に120Hz）。
 
 ```powershell
-.\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --repeat 1 --out-manifest manifests\r180_e250.json
+.\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r180_e250.json
 ```
 
 - `--interval`: vsyncの間引き（例: 180Hzモニタで 90Hz相当なら `--interval 2`）
+- `--padding-sec`: 同期信号（黒→赤）の前後に入れる黒余白（秒）。PCの安定待ち用（既定: 5秒）
 - `--repeat`: normal/inv を切り替えるフレーム反復（1なら毎フレーム交互）
 
 表示は以下の順で進みます:
 
-1. **全面黒 → 全面赤**（同期用スレート）
-2. **60条件 × 6秒**（各条件は normal/inv の交互表示）
+1. **黒 5秒**（余白・ウォームアップ）
+2. **全面黒 → 全面赤**（同期用スレート、各0.5秒）
+3. **黒 5秒**（余白・安定待ち）
+4. **60条件 × 6秒**（各条件は normal/inv の交互表示）
 
 撮影した動画は命名規則に従って保存してください（例: `r180_e250_f1.mp4`）。
 
 ## 解析（1コマンド）
 
 `黒→赤` の切替を同期にして、各条件の **2秒目〜5秒目** を切り出し→既存解析を実行→`results.csv` まで出力します。
+`--manifest` を指定すると `slate_sec` / `padding_sec` を自動読み取りします（未指定時は slate=0.5秒、padding=5秒）。
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video recordings/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json

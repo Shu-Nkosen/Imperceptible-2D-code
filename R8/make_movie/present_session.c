@@ -36,7 +36,7 @@ static const char* TOKENS[]   = { "R", "G", "B", "I",   "X"   };
 static const int CHANNEL_COUNT = 5;
 
 static void usage(void) {
-    printf("Usage: present_session.exe --rate <Hz> --exp <250|125|60> --interval <n> --out-manifest <path.json> [--block-sec 6] [--slate-sec 0.5] [--repeat 1]\\n");
+    printf("Usage: present_session.exe --rate <Hz> --exp <250|125|60> --interval <n> --out-manifest <path.json> [--block-sec 6] [--slate-sec 0.5] [--padding-sec 5] [--repeat 1]\\n");
     printf("Note: set OS display refresh to target rate before running (esp. 120Hz).\\n");
 }
 
@@ -109,6 +109,15 @@ static void draw_solid(float r, float g, float b) {
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
+static void draw_black_frames(GLFWwindow* window, int frames) {
+    for (int f = 0; f < frames && !glfwWindowShouldClose(window); f++) {
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+        draw_solid(0.0f, 0.0f, 0.0f);
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+}
+
 static int calc_frames(double sec, int refresh_hz, int interval) {
     if (sec <= 0) return 0;
     double fps = ((double)refresh_hz) / (double)interval;
@@ -125,6 +134,7 @@ static void write_manifest(
     int refresh_hz,
     double block_sec,
     double slate_sec,
+    double padding_sec,
     int repeat,
     Condition* conds,
     int cond_count
@@ -163,6 +173,7 @@ static void write_manifest(
     fprintf(f, "  \"monitor_hz\": %d,\n", refresh_hz);
     fprintf(f, "  \"block_sec\": %.6f,\n", block_sec);
     fprintf(f, "  \"slate_sec\": %.6f,\n", slate_sec);
+    fprintf(f, "  \"padding_sec\": %.6f,\n", padding_sec);
     fprintf(f, "  \"repeat\": %d,\n", repeat);
     fprintf(f, "  \"conditions\": [\n");
     for (int i = 0; i < cond_count; i++) {
@@ -213,6 +224,7 @@ int main(int argc, char** argv) {
     int repeat = parse_int_arg(argc, argv, "--repeat", 1);
     double block_sec = parse_double_arg(argc, argv, "--block-sec", 6.0);
     double slate_sec = parse_double_arg(argc, argv, "--slate-sec", 0.5);
+    double padding_sec = parse_double_arg(argc, argv, "--padding-sec", 5.0);
     const char* out_manifest = parse_str_arg(argc, argv, "--out-manifest", "");
 
     if (interval < 1) interval = 1;
@@ -265,8 +277,9 @@ int main(int argc, char** argv) {
         printf("[WARN] expected 60 conditions, got %d\\n", cond_count);
     }
 
-    write_manifest(out_manifest, rate_hz, exp, interval, refresh_hz, block_sec, slate_sec, repeat, conds, cond_count);
+    write_manifest(out_manifest, rate_hz, exp, interval, refresh_hz, block_sec, slate_sec, padding_sec, repeat, conds, cond_count);
 
+    const int padding_frames = calc_frames(padding_sec, refresh_hz, interval);
     const int slate_frames = calc_frames(slate_sec, refresh_hz, interval);
     const int block_frames = calc_frames(block_sec, refresh_hz, interval);
 
@@ -292,22 +305,23 @@ int main(int argc, char** argv) {
         }
     }
 
-    printf("[INFO] start slate black (%d frames) -> red (%d frames)\\n", slate_frames, slate_frames);
+    printf(
+        "[INFO] timeline: pre_padding=%d -> slate_black=%d -> slate_red=%d -> post_padding=%d frames\\n",
+        padding_frames, slate_frames, slate_frames, padding_frames
+    );
 
-    // Slate: black
-    for (int f = 0; f < slate_frames && !glfwWindowShouldClose(window); f++) {
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
-        draw_solid(0.0f, 0.0f, 0.0f);
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
-    // Slate: red
+    draw_black_frames(window, padding_frames);
+
+    // Slate: black -> red (sync signal)
+    draw_black_frames(window, slate_frames);
     for (int f = 0; f < slate_frames && !glfwWindowShouldClose(window); f++) {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
         draw_solid(1.0f, 0.0f, 0.0f);
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+    draw_black_frames(window, padding_frames);
 
     printf("[INFO] start conditions: %d blocks, block_frames=%d, repeat=%d\\n", cond_count, block_frames, repeat);
 
