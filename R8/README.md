@@ -62,7 +62,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 `--manifest` を指定すると `slate_sec` / `padding_sec` を自動読み取りします（未指定時は slate=0.5秒、padding=5秒）。
 
 ```bash
-python R8/analyze_code/run_pipeline.py --video recordings/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json
 ```
 
 出力先（デフォルト）:

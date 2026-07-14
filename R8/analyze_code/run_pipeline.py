@@ -19,10 +19,10 @@ from naming import VideoNameMeta, parse_video_name
 class SyncConfig:
     min_black_frames: int = 5
     min_red_frames: int = 3
-    black_v_max: float = 0.12  # HSV V threshold
-    red_r_min: float = 0.75    # normalized mean R threshold
-    red_g_max: float = 0.25
-    red_b_max: float = 0.25
+    black_v_max: float = 0.3  # HSV V threshold
+    red_r_min: float = 0.5    # normalized mean R threshold
+    red_g_max: float = 0.3
+    red_b_max: float = 0.3
 
 
 def parse_args() -> argparse.Namespace:
