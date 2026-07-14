@@ -640,6 +640,12 @@ def main() -> None:
         action="store_true",
         help="成功時の解析画像を保存しない",
     )
+    parser.add_argument(
+        "--base-dir",
+        type=str,
+        default="",
+        help="対象ルートの絶対パス（未指定時は本スクリプト配置ディレクトリ）",
+    )
     args = parser.parse_args()
 
     median_kernel = max(1, args.median_kernel)
@@ -658,7 +664,14 @@ def main() -> None:
         f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers}"
     )
 
-    base_dir = Path(__file__).resolve().parent
+    if args.base_dir:
+        base_dir = Path(args.base_dir).resolve()
+    else:
+        base_dir = Path(__file__).resolve().parent
+    if not base_dir.is_dir():
+        raise FileNotFoundError(f"base-dir が存在しません: {base_dir}")
+    print(f"[INFO] base_dir: {base_dir}")
+
     input_csv = base_dir / INPUT_CSV
     output_csv = base_dir / OUTPUT_CSV
     analysis_dir = base_dir / ANALYSIS_DIR

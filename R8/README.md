@@ -68,7 +68,7 @@ python R8/analyze_code/run_pipeline.py --video recordings/r180_e250_f1.mp4 --man
 出力先（デフォルト）:
 
 - `R8/analyze_code/out/r180_e250_f1/`
-  - `cond_000/` ... `cond_059/`（切り出しフレーム）
+  - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
   - `qr_decode_all_frames.csv`（既存スクリプト出力）
   - `results.csv`（集約結果）
 

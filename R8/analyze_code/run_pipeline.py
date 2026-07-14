@@ -171,6 +171,66 @@ def write_results_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
             w.writerow({k: r.get(k, "") for k in fieldnames})
 
 
+# present_session.c と同じ並び: channel → image → intensity
+BASE_IMAGES = ("rice", "nagaoka_fireworks", "hocho", "ex")
+CHANNELS = ("R", "G", "B", "min", "max")
+TOKENS = ("R", "G", "B", "I", "X")
+INTENSITIES = (4, 8, 12)
+
+
+def build_default_conditions() -> List[Dict[str, Any]]:
+    conditions: List[Dict[str, Any]] = []
+    idx = 0
+    for channel, token in zip(CHANNELS, TOKENS):
+        for image in BASE_IMAGES:
+            for intensity in INTENSITIES:
+                conditions.append(
+                    {
+                        "idx": idx,
+                        "image": image,
+                        "channel": channel,
+                        "token": token,
+                        "intensity": intensity,
+                    }
+                )
+                idx += 1
+    return conditions
+
+
+def condition_folder_name(cond: Dict[str, Any]) -> str:
+    image = str(cond.get("image", "unknown"))
+    token = str(cond.get("token", "X"))
+    intensity = int(cond.get("intensity", 0))
+    return f"{image}_{token}_{intensity}"
+
+
+def resolve_conditions(manifest: Dict[str, Any], n: int) -> List[Dict[str, Any]]:
+    items = manifest.get("conditions") if isinstance(manifest, dict) else None
+    if isinstance(items, list) and items:
+        by_idx: Dict[int, Dict[str, Any]] = {}
+        for item in items:
+            try:
+                idx = int(item.get("idx"))
+            except Exception:
+                continue
+            by_idx[idx] = dict(item)
+        resolved: List[Dict[str, Any]] = []
+        for i in range(n):
+            if i in by_idx:
+                resolved.append(by_idx[i])
+            else:
+                raise SystemExit(f"manifest conditions に idx={i} がありません")
+        return resolved
+
+    defaults = build_default_conditions()
+    if n != len(defaults):
+        raise SystemExit(
+            f"conditions={n} ですが default は {len(defaults)} 件です。"
+            " --manifest を渡すか --conditions を合わせてください。"
+        )
+    return defaults[:n]
+
+
 def main() -> None:
     ns = parse_args()
 
@@ -215,34 +275,42 @@ def main() -> None:
         f"slate_sec={slate_sec}, padding_sec={padding_sec}, block_sec={block_sec}"
     )
 
+    conditions = resolve_conditions(manifest, int(ns.conditions))
     saved_blocks: List[Dict[str, Any]] = []
-    for i in range(int(ns.conditions)):
+    for i, cond in enumerate(conditions):
         block_start = block0 + i * block_frames
         start = block_start + use_start
         end = block_start + use_end
-        cond_dir = out_root / f"cond_{i:03d}"
+        folder_name = condition_folder_name(cond)
+        cond_dir = out_root / folder_name
         saved = save_block_frames(cap, start, end, cond_dir)
         saved_blocks.append(
             {
                 "cond": i,
-                "folder": cond_dir.name,
+                "folder": folder_name,
+                "image": cond.get("image", ""),
+                "channel": cond.get("channel", ""),
+                "token": cond.get("token", ""),
+                "intensity": cond.get("intensity", ""),
                 "start_frame": start,
                 "end_frame": end,
                 "saved_frames": saved,
             }
         )
-        if (i + 1) % 10 == 0 or (i + 1) == int(ns.conditions):
-            print(f"[INFO] extracted {i+1}/{int(ns.conditions)}")
+        if (i + 1) % 10 == 0 or (i + 1) == len(conditions):
+            print(f"[INFO] extracted {i+1}/{len(conditions)} -> {folder_name}")
 
     cap.release()
 
+    out_root_abs = str(out_root.resolve())
+
     # run diff generation once at out_root (processes subdirs)
     diff_script = Path(__file__).resolve().parent / "cal-from-2frame-RGB-oute.py"
-    run_py(diff_script, cwd=out_root, args=[])
+    run_py(diff_script, cwd=out_root, args=["--base-dir", out_root_abs])
 
     # run decode once at out_root (scans for diff subdirs)
     decode_script = Path(__file__).resolve().parent / "decode_qr_from_all_frames.py"
-    decode_args = ["--workers", str(int(ns.workers))]
+    decode_args = ["--base-dir", out_root_abs, "--workers", str(int(ns.workers))]
     if ns.full_search:
         decode_args.append("--full-search")
     run_py(decode_script, cwd=out_root, args=decode_args)
@@ -251,20 +319,10 @@ def main() -> None:
     decoded_rows = load_decode_csv(decode_csv)
     decoded_by_folder = {r.get("folder", ""): r for r in decoded_rows if r.get("folder")}
 
-    manifest_conds: Dict[int, Dict[str, Any]] = {}
-    for item in manifest.get("conditions", []) if isinstance(manifest, dict) else []:
-        try:
-            idx = int(item.get("idx"))
-        except Exception:
-            continue
-        manifest_conds[idx] = dict(item)
-
     results: List[Dict[str, Any]] = []
     for info in saved_blocks:
-        i = int(info["cond"])
         folder = str(info["folder"])
         dec = decoded_by_folder.get(folder, {})
-        m = manifest_conds.get(i, {})
         row: Dict[str, Any] = {}
         row.update(
             {
@@ -276,15 +334,6 @@ def main() -> None:
                 **info,
             }
         )
-        if m:
-            row.update(
-                {
-                    "image": m.get("image", ""),
-                    "channel": m.get("channel", ""),
-                    "token": m.get("token", ""),
-                    "intensity": m.get("intensity", ""),
-                }
-            )
         if dec:
             for k, v in dec.items():
                 row[f"decode_{k}"] = v
