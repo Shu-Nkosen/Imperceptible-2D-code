@@ -1,4 +1,4 @@
-# ...existing code...
+import argparse
 import re
 import numpy as np
 import matplotlib.pyplot as plt
@@ -172,13 +172,26 @@ def process_directory(target_dir: Path, colors) -> bool:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="frame_*.png の隣接差分マップを生成する")
+    parser.add_argument(
+        "--base-dir",
+        type=str,
+        default="",
+        help="対象ルートの絶対パス（未指定時はカレントディレクトリ）",
+    )
+    args = parser.parse_args()
+
     colors = {
         "increased": parse_color(COLOR_INCREASED),
         "decreased": parse_color(COLOR_DECREASED),
         "unchanged": parse_color(COLOR_UNCHANGED),
     }
 
-    base_dir = Path.cwd()
+    base_dir = Path(args.base_dir).resolve() if args.base_dir else Path.cwd()
+    if not base_dir.is_dir():
+        raise FileNotFoundError(f"base-dir が存在しません: {base_dir}")
+    print(f"[INFO] base_dir: {base_dir}")
+
     target_dirs = [base_dir] + sorted(path for path in base_dir.iterdir() if path.is_dir())
 
     processed_count = 0
@@ -191,11 +204,10 @@ def main():
 
     if processed_count == 0:
         raise FileNotFoundError(
-            f"カレントディレクトリおよびサブディレクトリに {IMAGE_PATTERN} が見つかりません。"
+            f"{base_dir} およびサブディレクトリに {IMAGE_PATTERN} が見つかりません。"
         )
 
     print(f"\n処理終了: {processed_count} フォルダを処理しました。")
 
 if __name__ == "__main__":
     main()
-# ...existing code...
