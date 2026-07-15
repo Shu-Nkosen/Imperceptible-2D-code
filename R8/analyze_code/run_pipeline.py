@@ -135,29 +135,73 @@ def select_frame_indices(start_frame: int, end_frame_exclusive: int, max_frames:
     return list(range(start_frame, start_frame + count))
 
 
+def clear_frame_pngs(out_dir: Path) -> None:
+    """前回実行の frame_*.png を消す（シーク失敗時に古い3秒間引きが残るのを防ぐ）。"""
+    if not out_dir.exists():
+        return
+    for path in out_dir.glob("frame_?????.png"):
+        path.unlink(missing_ok=True)
+
+
+def open_capture_at(video_path: Path, frame_idx: int) -> cv2.VideoCapture:
+    """条件ごとに VideoCapture を開き直し、指定フレーム直前まで進める。"""
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise FileNotFoundError(str(video_path))
+
+    target = max(0, int(frame_idx))
+    if target > 0:
+        # 直接シーク（速いが不正確なことがある）
+        cap.set(cv2.CAP_PROP_POS_FRAMES, float(target))
+        pos = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        # 後ろに飛びすぎた／遠い場合は先頭から進め直す
+        if pos > target or abs(pos - target) > 2:
+            cap.release()
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                raise FileNotFoundError(str(video_path))
+            pos = 0
+        # 足りない分は grab で進める（正確）
+        while pos < target:
+            if not cap.grab():
+                break
+            pos += 1
+    return cap
+
+
 def save_block_frames(
-    cap: cv2.VideoCapture,
+    video_path: Path,
     start_frame: int,
     end_frame_exclusive: int,
     out_dir: Path,
     analysis_frames: int = ANALYSIS_FRAME_COUNT,
     resize_to: Optional[Tuple[int, int]] = (1920, 1080),
 ) -> int:
-    """差分計算用に analysis_frames 枚を区間先頭から連続で書き出す。"""
-    ensure_dir(out_dir)
-    indices = select_frame_indices(start_frame, end_frame_exclusive, analysis_frames)
+    """差分計算用に analysis_frames 枚を区間先頭から連続で書き出す。
 
+    フレームごとに CAP_PROP_POS_FRAMES すると MP4 で後半条件だけシークが壊れ、
+    0枚書き込みのまま旧フレームが残ることがある。条件ごとに開き直し、連続 read する。
+    """
+    ensure_dir(out_dir)
+    clear_frame_pngs(out_dir)
+    indices = select_frame_indices(start_frame, end_frame_exclusive, analysis_frames)
+    if not indices:
+        return 0
+
+    cap = open_capture_at(video_path, indices[0])
     saved = 0
-    for frame_idx in indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if resize_to is not None:
-            frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
-        out_path = out_dir / f"frame_{saved:05d}.png"
-        cv2.imwrite(str(out_path), frame)
-        saved += 1
+    try:
+        for _ in indices:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            if resize_to is not None:
+                frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
+            out_path = out_dir / f"frame_{saved:05d}.png"
+            cv2.imwrite(str(out_path), frame)
+            saved += 1
+    finally:
+        cap.release()
     return saved
 
 
@@ -339,10 +383,6 @@ def main() -> None:
         f"window_frames={use_end - use_start}, analysis_frames={ANALYSIS_FRAME_COUNT} (consecutive)"
     )
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        raise FileNotFoundError(str(video_path))
-
     # block 0 starts after red slate + post-padding (sync_frame = red onset)
     block0 = sync_frame + slate_frames + padding_frames
     print(
@@ -372,38 +412,52 @@ def main() -> None:
         out_root_abs = str(out_root.resolve())
 
         analyzed = save_block_frames(
-            cap,
+            video_path,
             start,
             end,
             cond_dir,
             analysis_frames=ANALYSIS_FRAME_COUNT,
         )
-        print(f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: analysis_frames={analyzed}")
+        extract_sec = (analyzed / fps) if fps > 0 else 0.0
+        print(
+            f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: "
+            f"frames={analyzed} span≈{extract_sec:.3f}s "
+            f"(video [{start}, {start + analyzed}))"
+        )
+        if analyzed < ANALYSIS_FRAME_COUNT:
+            print(
+                f"[WARN] {folder_name}: expected {ANALYSIS_FRAME_COUNT} frames, got {analyzed}. "
+                "切り出しが不完全です（シーク失敗の可能性）。"
+            )
 
         decode_note = ""
-        try:
-            run_py(diff_script, cwd=out_root, args=["--base-dir", cond_dir_abs])
-        except subprocess.CalledProcessError as exc:
-            decode_note = f"diff失敗: exit={exc.returncode}"
+        if analyzed <= 0:
+            decode_note = "extract失敗: 0 frames"
             print(f"[WARN] {folder_name}: {decode_note}")
-
-        if not decode_note:
-            decode_args = [
-                "--base-dir",
-                out_root_abs,
-                "--folder",
-                folder_name,
-                "--workers",
-                str(int(ns.workers)),
-                "--no-save-analysis",
-            ]
-            if ns.full_search:
-                decode_args.append("--full-search")
+        else:
             try:
-                run_py(decode_script, cwd=out_root, args=decode_args)
+                run_py(diff_script, cwd=out_root, args=["--base-dir", cond_dir_abs])
             except subprocess.CalledProcessError as exc:
-                decode_note = f"decode失敗: exit={exc.returncode}"
+                decode_note = f"diff失敗: exit={exc.returncode}"
                 print(f"[WARN] {folder_name}: {decode_note}")
+
+            if not decode_note:
+                decode_args = [
+                    "--base-dir",
+                    out_root_abs,
+                    "--folder",
+                    folder_name,
+                    "--workers",
+                    str(int(ns.workers)),
+                    "--no-save-analysis",
+                ]
+                if ns.full_search:
+                    decode_args.append("--full-search")
+                try:
+                    run_py(decode_script, cwd=out_root, args=decode_args)
+                except subprocess.CalledProcessError as exc:
+                    decode_note = f"decode失敗: exit={exc.returncode}"
+                    print(f"[WARN] {folder_name}: {decode_note}")
 
         kept = prune_saved_frames(cond_dir, keep_frames=int(ns.max_frames))
         info = {
@@ -414,8 +468,10 @@ def main() -> None:
             "token": cond.get("token", ""),
             "intensity": cond.get("intensity", ""),
             "start_frame": start,
-            "end_frame": end,
+            "end_frame": start + analyzed,
+            "window_end_frame": end,
             "analysis_frames": analyzed,
+            "extract_sec": f"{extract_sec:.6f}",
             "saved_frames": kept,
             "max_frames": int(ns.max_frames),
         }
@@ -442,7 +498,6 @@ def main() -> None:
         write_results_csv(results_csv, results)
         print(f"[OK] ({i+1}/{len(conditions)}) wrote {results_csv.name} ({len(results)} rows)")
 
-    cap.release()
     print(f"[OK] results: {results_csv}")
 
 
