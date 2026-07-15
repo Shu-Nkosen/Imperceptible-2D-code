@@ -58,11 +58,11 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 ## 解析（1コマンド）
 
-`黒→赤` の切替を同期にして、各条件の **2秒目〜5秒目** を切り出し→既存解析を実行します。
+`黒→赤` の切替を同期にして、各条件の **2秒目〜4秒目** を切り出し（120フレーム）→既存解析を実行します。
 **条件ごとに差分・デコードまで回し、完了のたびに `results.csv` を上書き**します（途中まで残るのでデバッグしやすい）。
 `--manifest` を指定すると `slate_sec` / `padding_sec` を自動読み取りします（未指定時は slate=0.5秒、padding=5秒）。
 
-差分計算は常に **約120組**（解析用に121フレームを抽出）行います。`--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
+差分計算は常に **120フレーム分** 行います。`--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
 
 解析後に120枚残す（既定）:
 
@@ -70,13 +70,14 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
 ```
 
-解析後に1枚だけ残す（ディスク節約。差分自体は約120組）:
+解析後に1枚だけ残す（ディスク節約。差分自体は120フレーム分）:
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1
 ```
 
-- `--max-frames`: `120`（既定）または `1`（残すPNG枚数）。差分計算は常に約120組
+- `--max-frames`: `120`（既定）または `1`（残すPNG枚数）。差分計算は常に120フレーム分
+- 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
 
 出力先（デフォルト）:
 

@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--conditions", type=int, default=60, help="number of blocks/conditions in a video")
     p.add_argument("--block-sec", type=float, default=6.0, help="block duration seconds")
     p.add_argument("--use-start-sec", type=float, default=2.0, help="within-block start sec to extract")
-    p.add_argument("--use-end-sec", type=float, default=5.0, help="within-block end sec to extract (exclusive)")
+    p.add_argument("--use-end-sec", type=float, default=4.0, help="within-block end sec to extract (exclusive)")
     p.add_argument("--slate-sec", type=float, default=None, help="slate black and slate red duration sec (default: manifest or 0.5)")
     p.add_argument("--padding-sec", type=float, default=None, help="black padding before/after sync slate sec (default: manifest or 5.0)")
     p.add_argument(
@@ -120,7 +120,7 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-ANALYSIS_FRAME_COUNT = 121  # 隣接差分を約120組得られるフレーム数（常に固定）
+ANALYSIS_FRAME_COUNT = 120  # 切り出し区間(既定2〜4秒)から使うフレーム数（常に固定）
 
 
 def select_frame_indices(start_frame: int, end_frame_exclusive: int, max_frames: int) -> List[int]:
