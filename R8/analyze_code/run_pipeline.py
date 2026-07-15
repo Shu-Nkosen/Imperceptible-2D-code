@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         choices=[1, 120],
         default=120,
-        help="各条件で保存する最大フレーム数（1=高速確認, 120=通常解析）。既定: 120",
+        help="解析後に残す frame_*.png の枚数（1 or 120）。差分計算は常に120フレーム分。既定: 120",
     )
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
     p.add_argument("--workers", type=int, default=1, help="passed to decode_qr_from_all_frames.py")
@@ -120,6 +120,9 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+ANALYSIS_FRAME_COUNT = 121  # 隣接差分を約120組得られるフレーム数（常に固定）
+
+
 def select_frame_indices(start_frame: int, end_frame_exclusive: int, max_frames: int) -> List[int]:
     total = max(0, end_frame_exclusive - start_frame)
     if total <= 0:
@@ -141,11 +144,12 @@ def save_block_frames(
     start_frame: int,
     end_frame_exclusive: int,
     out_dir: Path,
-    max_frames: int = 120,
+    analysis_frames: int = ANALYSIS_FRAME_COUNT,
     resize_to: Optional[Tuple[int, int]] = (1920, 1080),
 ) -> int:
+    """差分計算用に analysis_frames 枚を必ず書き出す。"""
     ensure_dir(out_dir)
-    indices = select_frame_indices(start_frame, end_frame_exclusive, max_frames)
+    indices = select_frame_indices(start_frame, end_frame_exclusive, analysis_frames)
 
     saved = 0
     for frame_idx in indices:
@@ -159,6 +163,40 @@ def save_block_frames(
         cv2.imwrite(str(out_path), frame)
         saved += 1
     return saved
+
+
+def prune_saved_frames(out_dir: Path, keep_frames: int) -> int:
+    """解析後に残す frame_*.png を keep_frames 枚に間引く。"""
+    paths = sorted(out_dir.glob("frame_?????.png"))
+    if not paths:
+        return 0
+    keep = min(int(keep_frames), len(paths))
+    if keep >= len(paths):
+        return len(paths)
+
+    if keep == 1:
+        keep_set = {paths[len(paths) // 2]}
+    else:
+        idxs = [
+            int(round(i * (len(paths) - 1) / (keep - 1)))
+            for i in range(keep)
+        ]
+        keep_set = {paths[i] for i in idxs}
+
+    for path in paths:
+        if path not in keep_set:
+            path.unlink(missing_ok=True)
+
+    # 残したファイルを frame_00000... にリネームし直す
+    kept = sorted(keep_set, key=lambda p: p.name)
+    tmp_paths: List[Path] = []
+    for i, path in enumerate(kept):
+        tmp = out_dir / f"_keep_{i:05d}.png"
+        path.rename(tmp)
+        tmp_paths.append(tmp)
+    for i, tmp in enumerate(tmp_paths):
+        tmp.rename(out_dir / f"frame_{i:05d}.png")
+    return len(tmp_paths)
 
 
 def pick_decode_row_for_folder(rows: List[Dict[str, str]], folder: str) -> Dict[str, str]:
@@ -317,7 +355,10 @@ def main() -> None:
     results_csv = out_root / "results.csv"
     results: List[Dict[str, Any]] = []
 
-    print(f"[INFO] max_frames={ns.max_frames} / results will be overwritten after each condition")
+    print(
+        f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
+        "/ results overwritten after each condition"
+    )
 
     for i, cond in enumerate(conditions):
         block_start = block0 + i * block_frames
@@ -328,26 +369,14 @@ def main() -> None:
         cond_dir_abs = str(cond_dir.resolve())
         out_root_abs = str(out_root.resolve())
 
-        saved = save_block_frames(
+        analyzed = save_block_frames(
             cap,
             start,
             end,
             cond_dir,
-            max_frames=int(ns.max_frames),
+            analysis_frames=ANALYSIS_FRAME_COUNT,
         )
-        info = {
-            "cond": i,
-            "folder": folder_name,
-            "image": cond.get("image", ""),
-            "channel": cond.get("channel", ""),
-            "token": cond.get("token", ""),
-            "intensity": cond.get("intensity", ""),
-            "start_frame": start,
-            "end_frame": end,
-            "saved_frames": saved,
-            "max_frames": int(ns.max_frames),
-        }
-        print(f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: saved={saved}")
+        print(f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: analysis_frames={analyzed}")
 
         decode_note = ""
         try:
@@ -373,6 +402,22 @@ def main() -> None:
             except subprocess.CalledProcessError as exc:
                 decode_note = f"decode失敗: exit={exc.returncode}"
                 print(f"[WARN] {folder_name}: {decode_note}")
+
+        kept = prune_saved_frames(cond_dir, keep_frames=int(ns.max_frames))
+        info = {
+            "cond": i,
+            "folder": folder_name,
+            "image": cond.get("image", ""),
+            "channel": cond.get("channel", ""),
+            "token": cond.get("token", ""),
+            "intensity": cond.get("intensity", ""),
+            "start_frame": start,
+            "end_frame": end,
+            "analysis_frames": analyzed,
+            "saved_frames": kept,
+            "max_frames": int(ns.max_frames),
+        }
+        print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
 
         decode_csv = out_root / "qr_decode_all_frames.csv"
         decoded_rows = load_decode_csv(decode_csv)
