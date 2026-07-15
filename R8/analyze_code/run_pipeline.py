@@ -120,23 +120,19 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-ANALYSIS_FRAME_COUNT = 120  # 切り出し区間(既定2〜4秒)から使うフレーム数（常に固定）
+ANALYSIS_FRAME_COUNT = 120  # 切り出し枚数（連続フレーム。60fpsならちょうど2秒分）
 
 
 def select_frame_indices(start_frame: int, end_frame_exclusive: int, max_frames: int) -> List[int]:
+    """区間 [start, end) の先頭から連続で最大 max_frames 枚を取る。
+
+    均等間引きだと（例: 2〜5秒から120枚）時間幅が3秒のまま残るため使わない。
+    """
     total = max(0, end_frame_exclusive - start_frame)
     if total <= 0:
         return []
     count = min(int(max_frames), total)
-    if count == 1:
-        return [start_frame + (total // 2)]
-    if count == total:
-        return list(range(start_frame, end_frame_exclusive))
-    # 区間から均等に間引き
-    return [
-        start_frame + int(round(i * (total - 1) / (count - 1)))
-        for i in range(count)
-    ]
+    return list(range(start_frame, start_frame + count))
 
 
 def save_block_frames(
@@ -147,7 +143,7 @@ def save_block_frames(
     analysis_frames: int = ANALYSIS_FRAME_COUNT,
     resize_to: Optional[Tuple[int, int]] = (1920, 1080),
 ) -> int:
-    """差分計算用に analysis_frames 枚を必ず書き出す。"""
+    """差分計算用に analysis_frames 枚を区間先頭から連続で書き出す。"""
     ensure_dir(out_dir)
     indices = select_frame_indices(start_frame, end_frame_exclusive, analysis_frames)
 
@@ -336,6 +332,12 @@ def main() -> None:
     use_end = int(round(float(ns.use_end_sec) * fps))
     if use_end <= use_start:
         raise SystemExit("use-end-sec must be > use-start-sec")
+    use_duration_sec = float(ns.use_end_sec) - float(ns.use_start_sec)
+    print(
+        f"[INFO] use_window=[{ns.use_start_sec:.3f}, {ns.use_end_sec:.3f})s "
+        f"duration={use_duration_sec:.3f}s / fps={fps:.4f} -> "
+        f"window_frames={use_end - use_start}, analysis_frames={ANALYSIS_FRAME_COUNT} (consecutive)"
+    )
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
