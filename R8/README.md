@@ -58,17 +58,28 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 ## 解析（1コマンド）
 
-`黒→赤` の切替を同期にして、各条件の **2秒目〜5秒目** を切り出し→既存解析を実行→`results.csv` まで出力します。
+`黒→赤` の切替を同期にして、各条件の **2秒目〜5秒目** を切り出し→既存解析を実行します。
+**条件ごとに差分・デコードまで回し、完了のたびに `results.csv` を上書き**します（途中まで残るのでデバッグしやすい）。
 `--manifest` を指定すると `slate_sec` / `padding_sec` を自動読み取りします（未指定時は slate=0.5秒、padding=5秒）。
 
+通常（各条件あたり最大120フレーム）:
+
 ```bash
-python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
 ```
+
+高速確認（各条件1フレーム。2フレーム差分はできないので主に同期・切り出し確認用）:
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1
+```
+
+- `--max-frames`: `120`（既定・通常解析）または `1`（高速確認）
 
 出力先（デフォルト）:
 
 - `R8/analyze_code/out/r180_e250_f1/`
   - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
-  - `qr_decode_all_frames.csv`（既存スクリプト出力）
-  - `results.csv`（集約結果）
+  - `qr_decode_all_frames.csv`（直近条件のデコード出力）
+  - `results.csv`（条件完了ごとに上書き更新される集約結果）
 

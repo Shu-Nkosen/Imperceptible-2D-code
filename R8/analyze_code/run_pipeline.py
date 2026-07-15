@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +34,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--use-end-sec", type=float, default=5.0, help="within-block end sec to extract (exclusive)")
     p.add_argument("--slate-sec", type=float, default=None, help="slate black and slate red duration sec (default: manifest or 0.5)")
     p.add_argument("--padding-sec", type=float, default=None, help="black padding before/after sync slate sec (default: manifest or 5.0)")
+    p.add_argument(
+        "--max-frames",
+        type=int,
+        choices=[1, 120],
+        default=120,
+        help="各条件で保存する最大フレーム数（1=高速確認, 120=通常解析）。既定: 120",
+    )
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
     p.add_argument("--workers", type=int, default=1, help="passed to decode_qr_from_all_frames.py")
     p.add_argument("--full-search", action="store_true", help="passed to decode_qr_from_all_frames.py")
@@ -114,18 +120,36 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def select_frame_indices(start_frame: int, end_frame_exclusive: int, max_frames: int) -> List[int]:
+    total = max(0, end_frame_exclusive - start_frame)
+    if total <= 0:
+        return []
+    count = min(int(max_frames), total)
+    if count == 1:
+        return [start_frame + (total // 2)]
+    if count == total:
+        return list(range(start_frame, end_frame_exclusive))
+    # 区間から均等に間引き
+    return [
+        start_frame + int(round(i * (total - 1) / (count - 1)))
+        for i in range(count)
+    ]
+
+
 def save_block_frames(
     cap: cv2.VideoCapture,
     start_frame: int,
     end_frame_exclusive: int,
     out_dir: Path,
+    max_frames: int = 120,
     resize_to: Optional[Tuple[int, int]] = (1920, 1080),
 ) -> int:
     ensure_dir(out_dir)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, float(start_frame))
+    indices = select_frame_indices(start_frame, end_frame_exclusive, max_frames)
 
     saved = 0
-    for i in range(start_frame, end_frame_exclusive):
+    for frame_idx in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
         ok, frame = cap.read()
         if not ok:
             break
@@ -135,6 +159,17 @@ def save_block_frames(
         cv2.imwrite(str(out_path), frame)
         saved += 1
     return saved
+
+
+def pick_decode_row_for_folder(rows: List[Dict[str, str]], folder: str) -> Dict[str, str]:
+    matches = [r for r in rows if r.get("folder") == folder]
+    if not matches:
+        return {}
+    # 成功行があれば優先、なければ末尾
+    for row in matches:
+        if str(row.get("success", "")).strip() in ("1", "True", "true"):
+            return row
+    return matches[-1]
 
 
 def read_manifest(path: Path) -> Dict[str, Any]:
@@ -276,71 +311,91 @@ def main() -> None:
     )
 
     conditions = resolve_conditions(manifest, int(ns.conditions))
-    saved_blocks: List[Dict[str, Any]] = []
+    script_dir = Path(__file__).resolve().parent
+    diff_script = script_dir / "cal-from-2frame-RGB-oute.py"
+    decode_script = script_dir / "decode_qr_from_all_frames.py"
+    results_csv = out_root / "results.csv"
+    results: List[Dict[str, Any]] = []
+
+    print(f"[INFO] max_frames={ns.max_frames} / results will be overwritten after each condition")
+
     for i, cond in enumerate(conditions):
         block_start = block0 + i * block_frames
         start = block_start + use_start
         end = block_start + use_end
         folder_name = condition_folder_name(cond)
         cond_dir = out_root / folder_name
-        saved = save_block_frames(cap, start, end, cond_dir)
-        saved_blocks.append(
-            {
-                "cond": i,
-                "folder": folder_name,
-                "image": cond.get("image", ""),
-                "channel": cond.get("channel", ""),
-                "token": cond.get("token", ""),
-                "intensity": cond.get("intensity", ""),
-                "start_frame": start,
-                "end_frame": end,
-                "saved_frames": saved,
-            }
+        cond_dir_abs = str(cond_dir.resolve())
+        out_root_abs = str(out_root.resolve())
+
+        saved = save_block_frames(
+            cap,
+            start,
+            end,
+            cond_dir,
+            max_frames=int(ns.max_frames),
         )
-        if (i + 1) % 10 == 0 or (i + 1) == len(conditions):
-            print(f"[INFO] extracted {i+1}/{len(conditions)} -> {folder_name}")
+        info = {
+            "cond": i,
+            "folder": folder_name,
+            "image": cond.get("image", ""),
+            "channel": cond.get("channel", ""),
+            "token": cond.get("token", ""),
+            "intensity": cond.get("intensity", ""),
+            "start_frame": start,
+            "end_frame": end,
+            "saved_frames": saved,
+            "max_frames": int(ns.max_frames),
+        }
+        print(f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: saved={saved}")
 
-    cap.release()
+        decode_note = ""
+        try:
+            run_py(diff_script, cwd=out_root, args=["--base-dir", cond_dir_abs])
+        except subprocess.CalledProcessError as exc:
+            decode_note = f"diff失敗: exit={exc.returncode}"
+            print(f"[WARN] {folder_name}: {decode_note}")
 
-    out_root_abs = str(out_root.resolve())
+        if not decode_note:
+            decode_args = [
+                "--base-dir",
+                out_root_abs,
+                "--folder",
+                folder_name,
+                "--workers",
+                str(int(ns.workers)),
+                "--no-save-analysis",
+            ]
+            if ns.full_search:
+                decode_args.append("--full-search")
+            try:
+                run_py(decode_script, cwd=out_root, args=decode_args)
+            except subprocess.CalledProcessError as exc:
+                decode_note = f"decode失敗: exit={exc.returncode}"
+                print(f"[WARN] {folder_name}: {decode_note}")
 
-    # run diff generation once at out_root (processes subdirs)
-    diff_script = Path(__file__).resolve().parent / "cal-from-2frame-RGB-oute.py"
-    run_py(diff_script, cwd=out_root, args=["--base-dir", out_root_abs])
+        decode_csv = out_root / "qr_decode_all_frames.csv"
+        decoded_rows = load_decode_csv(decode_csv)
+        dec = pick_decode_row_for_folder(decoded_rows, folder_name)
 
-    # run decode once at out_root (scans for diff subdirs)
-    decode_script = Path(__file__).resolve().parent / "decode_qr_from_all_frames.py"
-    decode_args = ["--base-dir", out_root_abs, "--workers", str(int(ns.workers))]
-    if ns.full_search:
-        decode_args.append("--full-search")
-    run_py(decode_script, cwd=out_root, args=decode_args)
-
-    decode_csv = out_root / "qr_decode_all_frames.csv"
-    decoded_rows = load_decode_csv(decode_csv)
-    decoded_by_folder = {r.get("folder", ""): r for r in decoded_rows if r.get("folder")}
-
-    results: List[Dict[str, Any]] = []
-    for info in saved_blocks:
-        folder = str(info["folder"])
-        dec = decoded_by_folder.get(folder, {})
-        row: Dict[str, Any] = {}
-        row.update(
-            {
-                "video": video_path.name,
-                "rate_hz": meta.rate_hz if meta else "",
-                "exp": meta.exp if meta else "",
-                "fluoro": meta.fluoro if meta else "",
-                "fps": f"{fps:.6f}",
-                **info,
-            }
-        )
+        row: Dict[str, Any] = {
+            "video": video_path.name,
+            "rate_hz": meta.rate_hz if meta else "",
+            "exp": meta.exp if meta else "",
+            "fluoro": meta.fluoro if meta else "",
+            "fps": f"{fps:.6f}",
+            **info,
+            "note": decode_note,
+        }
         if dec:
             for k, v in dec.items():
                 row[f"decode_{k}"] = v
-        results.append(row)
 
-    results_csv = out_root / "results.csv"
-    write_results_csv(results_csv, results)
+        results.append(row)
+        write_results_csv(results_csv, results)
+        print(f"[OK] ({i+1}/{len(conditions)}) wrote {results_csv.name} ({len(results)} rows)")
+
+    cap.release()
     print(f"[OK] results: {results_csv}")
 
 
