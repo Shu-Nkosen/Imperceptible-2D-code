@@ -81,6 +81,16 @@ def classify_luminance_change(img1: np.ndarray, img2: np.ndarray, threshold: flo
     unchanged = ~ (increased | decreased)
     return increased, decreased, unchanged, diff_map
 
+
+def classify_accumulated_abs_change(acc_map: np.ndarray, threshold: float):
+    """窓合算 |diff| を二値化。変化は両方向とも黒（increased にまとめる）。"""
+    changed = acc_map > threshold
+    unchanged = ~changed
+    increased = changed
+    decreased = np.zeros_like(changed, dtype=bool)
+    return increased, decreased, unchanged
+
+
 def save_combined_map(increased, decreased, unchanged, colors, output_path: Path):
     """差分マップをピクセル等倍のPNGで保存する（matplotlib余白なし）。
 
@@ -111,14 +121,18 @@ def extract_frame_index(path: Path):
     match = re.search(r"(\d+)$", path.stem)
     return int(match.group(1)) if match else None
 
-def collect_candidate_pairs(image_paths: List[Path], max_offset: int):
-    indexed_paths = sorted(
+def sort_indexed_paths(image_paths: List[Path]) -> List[Path]:
+    return sorted(
         image_paths,
         key=lambda p: (
             (idx := extract_frame_index(p)) is None,
             idx if idx is not None else p.stem,
         ),
     )
+
+
+def collect_candidate_pairs(image_paths: List[Path], max_offset: int):
+    indexed_paths = sort_indexed_paths(image_paths)
     candidate_pairs = []
     for i, path1 in enumerate(indexed_paths):
         idx1 = extract_frame_index(path1)
@@ -133,6 +147,18 @@ def collect_candidate_pairs(image_paths: List[Path], max_offset: int):
                 break
             candidate_pairs.append((path1, path2))
     return candidate_pairs
+
+
+def collect_nonoverlap_windows(image_paths: List[Path], window_n: int) -> List[List[Path]]:
+    """長さ window_n の非重複窓。余りフレームは捨てる。"""
+    if window_n < 2:
+        raise ValueError(f"window_n は 2 以上である必要があります: {window_n}")
+    indexed_paths = sort_indexed_paths(image_paths)
+    windows: List[List[Path]] = []
+    for start in range(0, len(indexed_paths) - window_n + 1, window_n):
+        windows.append(indexed_paths[start : start + window_n])
+    return windows
+
 
 def process_directory(target_dir: Path, colors, threshold: float, output_subdir: str = "") -> bool:
     image_paths = sorted(target_dir.glob(IMAGE_PATTERN))
@@ -179,13 +205,87 @@ def process_directory(target_dir: Path, colors, threshold: float, output_subdir:
     return True
 
 
+def process_directory_accum(
+    target_dir: Path,
+    colors,
+    threshold: float,
+    window_n: int,
+    output_subdir: str = "",
+) -> bool:
+    """非重複窓で |max-channel差分| を合算して二値化マップを出す。"""
+    image_paths = sorted(target_dir.glob(IMAGE_PATTERN))
+    if not image_paths:
+        return False
+
+    windows = collect_nonoverlap_windows(image_paths, window_n)
+    if not windows:
+        print(
+            f"[{target_dir.name}] 処理対象の窓がありません "
+            f"(frames={len(image_paths)}, window_n={window_n})。"
+        )
+        return True
+
+    output_dir = resolve_output_dir(target_dir, output_subdir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    cache = {}
+
+    def get_image(path: Path):
+        if path not in cache:
+            cache[path] = load_image_as_rgb(path, QUALITY_SCALE, RESIZE_METHOD)
+        return cache[path]
+
+    th255 = threshold * 255.0
+    print(
+        f"\n[{target_dir.name}] {len(image_paths)}枚を検出。非重複窓 {len(windows)} 個を処理します。"
+        f" window_n={window_n} threshold={th255:.0f}/255 ({threshold:.6f})"
+    )
+    for idx, window in enumerate(windows, 1):
+        acc = None
+        for i in range(len(window) - 1):
+            img1 = get_image(window[i])
+            img2 = get_image(window[i + 1])
+            if img1.shape != img2.shape:
+                raise ValueError(
+                    f"画像サイズが一致しません: {window[i].name} {img1.shape} "
+                    f"vs {window[i + 1].name} {img2.shape}"
+                )
+            abs_diff = np.abs(compute_max_channel_difference(img1, img2))
+            acc = abs_diff if acc is None else (acc + abs_diff)
+
+        assert acc is not None
+        increased, decreased, unchanged = classify_accumulated_abs_change(acc, threshold)
+        pair_name = build_pair_folder_name(window[0], window[-1])
+        output_path = output_dir / f"{pair_name}_rgbmax_scale{QUALITY_SCALE:.2f}.png"
+        save_combined_map(increased, decreased, unchanged, colors, output_path)
+
+        if idx % 20 == 0 or idx == len(windows):
+            print(f"  {idx} / {len(windows)} 窓完了")
+
+    print(f"[{target_dir.name}] 完了。出力先: {output_dir.resolve()}")
+    return True
+
+
 def main():
-    parser = argparse.ArgumentParser(description="frame_*.png の隣接差分マップを生成する")
+    parser = argparse.ArgumentParser(description="frame_*.png の差分マップを生成する（pair / accum）")
     parser.add_argument(
         "--base-dir",
         type=str,
         default="",
         help="対象ルートの絶対パス（未指定時はカレントディレクトリ）",
+    )
+    parser.add_argument(
+        "--diff-mode",
+        type=str,
+        choices=["pair", "accum"],
+        default="pair",
+        help="差分モード: pair=隣接ペア（既定） / accum=非重複窓の|差分|合算",
+    )
+    parser.add_argument(
+        "--window-n",
+        type=int,
+        default=4,
+        help="accum 時の窓長（フレーム数）。既定: 4",
     )
     parser.add_argument(
         "--threshold",
@@ -211,16 +311,32 @@ def main():
     if not base_dir.is_dir():
         raise FileNotFoundError(f"base-dir が存在しません: {base_dir}")
     print(f"[INFO] base_dir: {base_dir}")
+    print(f"[INFO] diff_mode: {args.diff_mode}")
 
     threshold = float(args.threshold) / 255.0
     output_subdir = args.output_subdir.strip() or str(OUTPUT_DIR)
+    window_n = int(args.window_n)
+    if args.diff_mode == "accum" and window_n < 2:
+        raise SystemExit("--window-n は 2 以上である必要があります")
 
     target_dirs = [base_dir] + sorted(path for path in base_dir.iterdir() if path.is_dir())
 
     processed_count = 0
     for target_dir in target_dirs:
         try:
-            if process_directory(target_dir, colors, threshold=threshold, output_subdir=output_subdir):
+            if args.diff_mode == "accum":
+                ok = process_directory_accum(
+                    target_dir,
+                    colors,
+                    threshold=threshold,
+                    window_n=window_n,
+                    output_subdir=output_subdir,
+                )
+            else:
+                ok = process_directory(
+                    target_dir, colors, threshold=threshold, output_subdir=output_subdir
+                )
+            if ok:
                 processed_count += 1
         except Exception as exc:
             print(f"[WARN] {target_dir} の処理中にエラー: {exc}")

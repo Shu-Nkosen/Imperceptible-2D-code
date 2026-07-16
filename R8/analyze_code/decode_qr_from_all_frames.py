@@ -77,6 +77,7 @@ def sanitize_filename(value: str) -> str:
 
 
 def parse_diff_pair_indices(path: Path) -> Optional[Tuple[int, int]]:
+    """差分ファイル名の先頭・末尾フレーム番号を返す（pair は隣接、accum は窓端点）。"""
     match = re.match(r"(\d+)-(\d+)-", path.stem)
     if not match:
         return None

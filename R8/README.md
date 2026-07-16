@@ -1,5 +1,7 @@
 # R8 sweep (表示→撮影→解析)
 
+**コマンド早見表:** 表示パターンと解析パターンをコマンドとセットでまとめたものは [`command.md`](command.md) を参照。
+
 ## 命名規則（動画ファイル）
 
 **`r{rate}_e{exp}_f{fluoro}.mp4`**
@@ -102,13 +104,32 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 **条件ごとに差分・デコードまで回し、完了のたびに `results.csv` を上書き**します（途中まで残るのでデバッグしやすい）。
 `--manifest` を指定すると `slate_sec` / `padding_sec` を自動読み取りします（未指定時は slate=0.5秒、padding=5秒）。
 
-差分計算は常に **120フレーム分** 行います。差分の二値化閾値は毎回 **4 / 8 / 12** を総当たりし、デコード成功したもののうち `pixel_acc_ok` が最大の閾値を `results.csv` に採用します（同点なら小さい閾値）。
+差分計算は常に **120フレーム分** 行います。`--diff-mode` で差分の作り方を切り替えます（既定 `pair`）。
+
+| `--diff-mode` | 内容 | 既定スイープ |
+|---|---|---|
+| `pair`（既定） | 隣接フレームの max-channel 差分 | th = **4 / 8 / 12** |
+| `accum` | 非重複窓 `1..n`, `n+1..2n`, … で abs(max-channel差分) の合算 | n = **3 / 4 / 5** × th = **12 / 16 / 24 / 32** |
+
+デコード成功したもののうち `pixel_acc_ok` が最大の組み合わせを `results.csv` に採用します（同点なら小さい th、さらに同点なら小さい n）。
 `--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
 
-解析後に120枚残す（既定・QR探索は fast）:
+解析後に120枚残す（既定・pair・QR探索は fast）:
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
+```
+
+窓合算（accum）で解析:
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode accum
+```
+
+accum のスイープを上書きする例:
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode accum --window-ns 4 --diff-thresholds 16,24,32
 ```
 
 解析後に1枚だけ残す（ディスク節約。差分自体は120フレーム分）:
@@ -124,6 +145,9 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 ```
 
 - `--max-frames`: `120`（既定）または `1`（残すPNG枚数）。差分計算は常に120フレーム分
+- `--diff-mode`: `pair`（既定）または `accum`
+- `--window-ns`: accum 時の窓長（カンマ区切り。未指定時 `3,4,5`）
+- `--diff-thresholds`: 閾値スイープ（カンマ区切り。未指定時は mode ごとの既定）
 - 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
 - QR探索モード（`decode_qr_from_all_frames.py` に渡る）:
 
@@ -145,7 +169,8 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 - `R8/analyze_code/out/r180_e250_f1/`
   - `frame_QR.png`（動画内のGT用QR表示から自動生成した正解マスク）
   - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
-  - `rgb_max_diff_maps_th4/` … `th12/`（各条件内。閾値ごとの差分）
+  - `rgb_max_diff_maps_th4/` … `th12/`（pair 時。各条件内・閾値ごとの差分）
+  - `rgb_max_accum_n4_th16/` など（accum 時。窓長×閾値ごとの差分）
   - `qr_decode_all_frames.csv`（全条件のデコード詳細。条件完了ごとに蓄積して上書き）
   - `results.csv`（条件完了ごとに蓄積して上書きされる集約結果）
 
@@ -156,13 +181,15 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | `folder` | 条件フォルダ名（例: `ex_R_8`） |
 | `decode_note` | 失敗理由。成功時は空（`decode_success` は出さない） |
 | `decode_variant` | 成功時に効いたバリアント名（例: `median_otsu`）。失敗時は空 |
-| `diff_threshold` | 採用した差分閾値（4 / 8 / 12）。毎回総当たりして選ぶ |
-| `pixel_acc_all` | 全差分ペアの画素 accuracy 平均（GT QR から作った `frame_QR.png` があるとき） |
-| `pixel_acc_ok` | デコード成功ペアだけの accuracy 平均（同上） |
+| `diff_mode` | `pair` または `accum` |
+| `window_n` | accum で採用した窓長。pair 時は空 |
+| `diff_threshold` | 採用した差分閾値。毎回総当たりして選ぶ |
+| `pixel_acc_all` | 全差分ペア／窓の画素 accuracy 平均（GT QR から作った `frame_QR.png` があるとき） |
+| `pixel_acc_ok` | デコード成功したものだけの accuracy 平均（同上） |
 | `video` / `display_rate` / `exposure` / `fluorescent` / `camera_fps` | 動画共通メタ。**先頭行だけ**埋める（例: `180 Hz`, `1/250`, `蛍光灯あり`, `59.940 fps`） |
 | `cond` … `intensity` | 条件の内訳 |
-| `decode_decoded_text` / `decode_method` / `decode_frame_*` | 成功した代表ペアの詳細 |
+| `decode_decoded_text` / `decode_method` / `decode_frame_*` | 成功した代表の詳細（accum 時 `frame_*` は窓の端点） |
 | `note` / `analysis_frames` / `extract_sec` | パイプライン側のメモ・切り出し健全性 |
 
-ペア単位の全詳細は `qr_decode_all_frames.csv` を参照してください。
+ペア／窓単位の全詳細は `qr_decode_all_frames.csv` を参照してください。
 

@@ -54,8 +54,41 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="passed to decode_qr_from_all_frames.py (全バリアント+拡大+Multi)",
     )
+    p.add_argument(
+        "--diff-mode",
+        type=str,
+        choices=["pair", "accum"],
+        default="pair",
+        help="差分モード: pair=隣接ペア（既定） / accum=非重複窓の|差分|合算",
+    )
+    p.add_argument(
+        "--window-ns",
+        type=str,
+        default="",
+        help="accum 時の窓長スイープ（カンマ区切り）。未指定時: 3,4,5",
+    )
+    p.add_argument(
+        "--diff-thresholds",
+        type=str,
+        default="",
+        help="差分閾値スイープ（カンマ区切り）。未指定時: pair=4,8,12 / accum=12,16,24,32",
+    )
     return p.parse_args()
 
+
+def parse_int_list(raw: str, default: Tuple[int, ...]) -> Tuple[int, ...]:
+    text = (raw or "").strip()
+    if not text:
+        return default
+    values: List[int] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        values.append(int(part))
+    if not values:
+        raise SystemExit(f"空の整数リストです: {raw!r}")
+    return tuple(values)
 
 def robust_fps(cap: cv2.VideoCapture) -> float:
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -330,6 +363,8 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "folder",
     "decode_note",
     "decode_variant",
+    "diff_mode",
+    "window_n",
     "diff_threshold",
     "pixel_acc_all",
     "pixel_acc_ok",
@@ -352,9 +387,10 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "extract_sec",
 )
 
-# 差分二値化閾値の総当たり（0-255 dual）。理想差分≈2×強度なので 4/8/12 を毎回試す
-DIFF_THRESHOLDS: Tuple[int, ...] = (4, 8, 12)
-
+# 差分二値化閾値の既定スイープ（0-255 dual）
+DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 8, 12)
+DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (12, 16, 24, 32)
+WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 4, 5)
 # GT QR 挿入位置（present_session.c と同じ: before cond 0 / 30 / after last）
 DEFAULT_GT_QR_INSERT_BEFORE: Tuple[int, ...] = (0, 30, 60)
 DEFAULT_GT_QR_SEC = 3.0
@@ -675,9 +711,23 @@ def main() -> None:
     results: List[Dict[str, Any]] = []
     all_decode_rows: List[Dict[str, str]] = []
 
+    diff_mode = str(ns.diff_mode)
+    if diff_mode == "accum":
+        window_ns = parse_int_list(ns.window_ns, WINDOW_NS_ACCUM)
+        if any(n < 2 for n in window_ns):
+            raise SystemExit("--window-ns の各値は 2 以上である必要があります")
+        diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_ACCUM)
+        sweep: List[Tuple[Optional[int], int]] = [(n, th) for n in window_ns for th in diff_thresholds]
+    else:
+        window_ns = ()
+        diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_PAIR)
+        sweep = [(None, th) for th in diff_thresholds]
+
     print(
         f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
-        f"/ diff_thresholds={list(DIFF_THRESHOLDS)} "
+        f"/ diff_mode={diff_mode} "
+        f"/ window_ns={list(window_ns) if window_ns else '-'} "
+        f"/ diff_thresholds={list(diff_thresholds)} "
         "/ results+decode CSV overwritten after each condition (accumulated)"
     )
 
@@ -712,32 +762,57 @@ def main() -> None:
         decode_note = ""
         best_dec: Dict[str, str] = {}
         best_th: Optional[int] = None
+        best_window_n: Optional[int] = None
         best_rows: List[Dict[str, str]] = []
         folder_decode_rows: List[Dict[str, str]] = []
-        success_candidates: List[Tuple[int, Dict[str, str], List[Dict[str, str]], float]] = []
+        # (window_n, th, decode_row, rows, pixel_acc_ok)
+        success_candidates: List[
+            Tuple[Optional[int], int, Dict[str, str], List[Dict[str, str]], float]
+        ] = []
 
         if analyzed <= 0:
             decode_note = "extract失敗: 0 frames"
             print(f"[WARN] {folder_name}: {decode_note}")
         else:
-            for th in DIFF_THRESHOLDS:
-                diff_subdir = f"rgb_max_diff_maps_th{th}"
-                print(f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: threshold={th}")
-                try:
-                    run_py(
-                        diff_script,
-                        cwd=out_root,
-                        args=[
-                            "--base-dir",
-                            cond_dir_abs,
-                            "--threshold",
-                            str(th),
-                            "--output-subdir",
-                            diff_subdir,
-                        ],
+            for win_n, th in sweep:
+                if diff_mode == "accum":
+                    assert win_n is not None
+                    diff_subdir = f"rgb_max_accum_n{win_n}_th{th}"
+                    print(
+                        f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: "
+                        f"accum window_n={win_n} threshold={th}"
                     )
+                    diff_args = [
+                        "--base-dir",
+                        cond_dir_abs,
+                        "--diff-mode",
+                        "accum",
+                        "--window-n",
+                        str(win_n),
+                        "--threshold",
+                        str(th),
+                        "--output-subdir",
+                        diff_subdir,
+                    ]
+                else:
+                    diff_subdir = f"rgb_max_diff_maps_th{th}"
+                    print(f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: threshold={th}")
+                    diff_args = [
+                        "--base-dir",
+                        cond_dir_abs,
+                        "--diff-mode",
+                        "pair",
+                        "--threshold",
+                        str(th),
+                        "--output-subdir",
+                        diff_subdir,
+                    ]
+
+                try:
+                    run_py(diff_script, cwd=out_root, args=diff_args)
                 except subprocess.CalledProcessError as exc:
-                    print(f"[WARN] {folder_name}: diff失敗 th={th} exit={exc.returncode}")
+                    label = f"n={win_n} th={th}" if win_n is not None else f"th={th}"
+                    print(f"[WARN] {folder_name}: diff失敗 {label} exit={exc.returncode}")
                     continue
 
                 decode_args = [
@@ -758,13 +833,16 @@ def main() -> None:
                 try:
                     run_py(decode_script, cwd=out_root, args=decode_args)
                 except subprocess.CalledProcessError as exc:
-                    print(f"[WARN] {folder_name}: decode失敗 th={th} exit={exc.returncode}")
+                    label = f"n={win_n} th={th}" if win_n is not None else f"th={th}"
+                    print(f"[WARN] {folder_name}: decode失敗 {label} exit={exc.returncode}")
                     continue
 
                 th_rows = [r for r in load_decode_csv(decode_csv) if r.get("folder") == folder_name]
                 tagged_rows: List[Dict[str, str]] = []
                 for r in th_rows:
                     row_th = dict(r)
+                    row_th["diff_mode"] = diff_mode
+                    row_th["window_n"] = "" if win_n is None else str(win_n)
                     row_th["diff_threshold"] = str(th)
                     tagged_rows.append(row_th)
                 folder_decode_rows.extend(tagged_rows)
@@ -774,21 +852,41 @@ def main() -> None:
                 if ok:
                     _, acc_ok = pixel_accuracy_for_folder(th_rows, folder_name)
                     acc_val = float(acc_ok) if acc_ok else -1.0
-                    success_candidates.append((th, dec_th, th_rows, acc_val))
-                    print(f"[OK] {folder_name}: success at threshold={th} (pixel_acc_ok={acc_ok or 'n/a'})")
+                    success_candidates.append((win_n, th, dec_th, th_rows, acc_val))
+                    n_label = f"n={win_n} " if win_n is not None else ""
+                    print(
+                        f"[OK] {folder_name}: success at {n_label}threshold={th} "
+                        f"(pixel_acc_ok={acc_ok or 'n/a'})"
+                    )
 
             if success_candidates:
-                # 成功のうち pixel_acc_ok が最大のものを採用（同点なら小さい th）
-                success_candidates.sort(key=lambda x: (-x[3], x[0]))
-                best_th, best_dec, best_rows, _ = success_candidates[0]
-                print(f"[OK] {folder_name}: selected threshold={best_th}")
+                # 成功のうち pixel_acc_ok 最大 → 小さい th → 小さい n
+                success_candidates.sort(
+                    key=lambda x: (-x[4], x[1], x[0] if x[0] is not None else 0)
+                )
+                best_window_n, best_th, best_dec, best_rows, _ = success_candidates[0]
+                n_label = f"n={best_window_n} " if best_window_n is not None else ""
+                print(f"[OK] {folder_name}: selected {n_label}threshold={best_th}")
             elif folder_decode_rows:
-                last_th = int(folder_decode_rows[-1].get("diff_threshold") or DIFF_THRESHOLDS[-1])
-                best_th = last_th
-                best_rows = [r for r in folder_decode_rows if r.get("diff_threshold") == str(last_th)]
-                # strip threshold key for metrics helpers that only need accuracy/success
+                last = folder_decode_rows[-1]
+                best_th = int(last.get("diff_threshold") or diff_thresholds[-1])
+                win_raw = str(last.get("window_n") or "").strip()
+                best_window_n = int(win_raw) if win_raw else None
+                best_rows = [
+                    r
+                    for r in folder_decode_rows
+                    if r.get("diff_threshold") == str(best_th)
+                    and r.get("window_n", "") == ("" if best_window_n is None else str(best_window_n))
+                ]
                 best_dec = pick_decode_row_for_folder(
-                    [{k: v for k, v in r.items() if k != "diff_threshold"} for r in best_rows],
+                    [
+                        {
+                            k: v
+                            for k, v in r.items()
+                            if k not in ("diff_threshold", "diff_mode", "window_n")
+                        }
+                        for r in best_rows
+                    ],
                     folder_name,
                 )
             else:
@@ -821,6 +919,8 @@ def main() -> None:
             "folder": folder_name,
             "decode_note": decode_note_out,
             "decode_variant": decode_variant if not decode_note_out else "",
+            "diff_mode": diff_mode,
+            "window_n": "" if best_window_n is None else str(best_window_n),
             "diff_threshold": "" if best_th is None else str(best_th),
             "pixel_acc_all": pixel_acc_all,
             "pixel_acc_ok": pixel_acc_ok,
