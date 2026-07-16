@@ -135,9 +135,131 @@ static int file_exists(const char* path) {
 }
 
 static const char* resolve_gt_qr_path(void) {
-    static const char* path = "HP_QR.png";
-    if (file_exists(path)) return path;
+    // Prefer precomposed full-frame asset (same geometry as embedded QR).
+    static const char* full_path = "gt_qr_display.png";
+    static const char* mask_path = "HP_QR.png";
+    if (file_exists(full_path)) return full_path;
+    if (file_exists(mask_path)) return mask_path;
     return NULL;
+}
+
+// Same placement as gen_assets.py: QR fills height x height square, centered on 1920x1080.
+static void nn_resize_gray(
+    const unsigned char* src, int sw, int sh,
+    unsigned char* dst, int dw, int dh
+) {
+    for (int y = 0; y < dh; y++) {
+        int sy = (int)((long long)y * sh / dh);
+        if (sy >= sh) sy = sh - 1;
+        for (int x = 0; x < dw; x++) {
+            int sx = (int)((long long)x * sw / dw);
+            if (sx >= sw) sx = sw - 1;
+            dst[y * dw + x] = src[sy * sw + sx];
+        }
+    }
+}
+
+static GLuint upload_rgb_texture(const unsigned char* rgb, int width, int height) {
+    GLuint texture_id;
+    glGenTextures(1, &texture_id);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, rgb);
+    return texture_id;
+}
+
+static GLuint load_gt_qr_texture(const char* filename, int canvas_w, int canvas_h) {
+    int width = 0, height = 0, channels = 0;
+    unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
+    if (!data) {
+        printf("[ERROR] stbi_load failed: %s\\n", filename);
+        return 0;
+    }
+
+    // Already a full-frame display asset: upload as-is (convert gray/RGBA -> RGB).
+    if (width == canvas_w && height == canvas_h) {
+        unsigned char* rgb = (unsigned char*)malloc((size_t)canvas_w * (size_t)canvas_h * 3u);
+        if (!rgb) {
+            stbi_image_free(data);
+            return 0;
+        }
+        for (int i = 0; i < canvas_w * canvas_h; i++) {
+            unsigned char v;
+            if (channels == 1) {
+                v = data[i];
+            } else if (channels >= 3) {
+                v = data[i * channels];
+            } else {
+                v = 255;
+            }
+            rgb[i * 3 + 0] = v;
+            rgb[i * 3 + 1] = v;
+            rgb[i * 3 + 2] = v;
+        }
+        stbi_image_free(data);
+        GLuint tex = upload_rgb_texture(rgb, canvas_w, canvas_h);
+        free(rgb);
+        printf("[INFO] GT QR texture loaded full-frame: %s (%dx%d)\\n", filename, canvas_w, canvas_h);
+        return tex;
+    }
+
+    // Mask (e.g. 330x330): compose white 1920x1080 with centered square QR (=height).
+    int square = canvas_h;
+    int x0 = (canvas_w - square) / 2;
+    if (x0 < 0) x0 = 0;
+
+    unsigned char* gray_src = (unsigned char*)malloc((size_t)width * (size_t)height);
+    unsigned char* gray_sq = (unsigned char*)malloc((size_t)square * (size_t)square);
+    unsigned char* rgb = (unsigned char*)malloc((size_t)canvas_w * (size_t)canvas_h * 3u);
+    if (!gray_src || !gray_sq || !rgb) {
+        free(gray_src);
+        free(gray_sq);
+        free(rgb);
+        stbi_image_free(data);
+        return 0;
+    }
+
+    for (int i = 0; i < width * height; i++) {
+        if (channels == 1) {
+            gray_src[i] = data[i];
+        } else if (channels >= 3) {
+            gray_src[i] = data[i * channels];
+        } else {
+            gray_src[i] = 255;
+        }
+    }
+    stbi_image_free(data);
+
+    nn_resize_gray(gray_src, width, height, gray_sq, square, square);
+    free(gray_src);
+
+    // White background
+    memset(rgb, 255, (size_t)canvas_w * (size_t)canvas_h * 3u);
+    for (int y = 0; y < square; y++) {
+        for (int x = 0; x < square; x++) {
+            unsigned char v = gray_sq[y * square + x];
+            // Binary like gen_assets / create_white_qr
+            v = (v < 128) ? 0 : 255;
+            int dx = x0 + x;
+            if (dx < 0 || dx >= canvas_w) continue;
+            int di = (y * canvas_w + dx) * 3;
+            rgb[di + 0] = v;
+            rgb[di + 1] = v;
+            rgb[di + 2] = v;
+        }
+    }
+    free(gray_sq);
+
+    GLuint tex = upload_rgb_texture(rgb, canvas_w, canvas_h);
+    free(rgb);
+    printf(
+        "[INFO] GT QR composed from mask %s (%dx%d) -> canvas %dx%d center_square=%d x0=%d\\n",
+        filename, width, height, canvas_w, canvas_h, square, x0
+    );
+    return tex;
 }
 
 static void draw_texture_frames(GLFWwindow* window, GLuint texture_id, int frames) {
@@ -379,7 +501,9 @@ int main(int argc, char** argv) {
         }
     }
 
-    GLuint gt_qr_tex = load_texture(gt_qr_path);
+    // Compose GT QR to match embedded QR geometry (center square = height on 1920x1080).
+    // Do NOT stretch HP_QR.png (e.g. 330x330) to full 16:9 — that breaks scale for pixel_acc.
+    GLuint gt_qr_tex = load_gt_qr_texture(gt_qr_path, width, height);
     if (gt_qr_tex == 0) {
         printf("[ERROR] failed to load GT QR texture: %s\\n", gt_qr_path);
         glfwDestroyWindow(window);

@@ -94,7 +94,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 撮影した動画は命名規則に従って保存してください（例: `r180_e250_f1.mp4`）。
 
-**注意:** QR差し込み入りの表示に更新したので、`present_session.exe` を再ビルドしてください。GT表示は `R8/make_movie/HP_QR.png` を使います。旧動画（QR区間なし・旧manifest）を解析する場合は、manifest に `gt_qr_slots` が無いと従来の連続タイムラインとして扱います。解析時は QR スロット中央付近から `frame_QR.png` を自動生成し、`pixel_acc_*` に使います。
+**注意:** QR差し込み入りの表示に更新したので、`present_session.exe` を再ビルドしてください。GT表示は埋め込みQRと同じ配置（1920×1080 中央の 1080×1080 正方形）で出します。`gen_assets.py` が作る `gt_qr_display.png` を優先し、無ければ `HP_QR.png`（330×330）から同じ配置で合成します（全面引き伸ばしはしません）。旧動画（QR区間なし・旧manifest）を解析する場合は、manifest に `gt_qr_slots` が無いと従来の連続タイムラインとして扱います。解析時は QR スロット中央付近から `frame_QR.png` を自動生成し、`pixel_acc_*` に使います。
 
 ## 解析（1コマンド）
 

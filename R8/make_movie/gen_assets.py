@@ -209,6 +209,22 @@ def main() -> None:
     cv2.imwrite(str(args.out_dir / "slate_black.png"), slate_black)
     cv2.imwrite(str(args.out_dir / "slate_red.png"), slate_red)
 
+    # GT QR display: same center-square placement as embedded conditions (white bg).
+    # present_session prefers this over stretching raw HP_QR.png to full screen.
+    qr_gray = cv2.imread(str(args.qr_path), cv2.IMREAD_GRAYSCALE)
+    if qr_gray is None:
+        print(f"[WARN] could not write gt_qr_display.png (missing {args.qr_path.name})")
+    else:
+        qr_sq = cv2.resize(qr_gray, (square, square), interpolation=cv2.INTER_NEAREST)
+        _, qr_bin = cv2.threshold(qr_sq, 127, 255, cv2.THRESH_BINARY)
+        gt_display = np.full((args.height, args.width, 3), 255, dtype=np.uint8)
+        gt_display[:, x0 : x0 + square, 0] = qr_bin
+        gt_display[:, x0 : x0 + square, 1] = qr_bin
+        gt_display[:, x0 : x0 + square, 2] = qr_bin
+        gt_path = args.out_dir / "gt_qr_display.png"
+        cv2.imwrite(str(gt_path), gt_display)
+        print(f"[OK] wrote {gt_path.name} (center square={square}, x0={x0})")
+
     print(f"[OK] generated={generated} (+ slates) out_dir={args.out_dir}")
 
 
