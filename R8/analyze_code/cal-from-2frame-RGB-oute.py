@@ -74,6 +74,17 @@ def compute_max_channel_difference(img1: np.ndarray, img2: np.ndarray):
 
     return diff_map
 
+
+def compute_max_channel_signal(img: np.ndarray) -> np.ndarray:
+    """1フレームから max-channel 強調のスカラー場を作る。"""
+    mean_all = img.mean(axis=2, keepdims=True)
+    abs_dev = np.abs(img - mean_all)
+    max_indices = np.argmax(abs_dev, axis=2)
+    selected = np.take_along_axis(img, max_indices[..., None], axis=2).squeeze(-1)
+    sum_all = img.sum(axis=2)
+    other_mean = (sum_all - selected) / 2.0
+    return selected - other_mean
+
 def classify_luminance_change(img1: np.ndarray, img2: np.ndarray, threshold: float):
     diff_map = compute_max_channel_difference(img1, img2)
     increased = diff_map > threshold
@@ -85,6 +96,14 @@ def classify_luminance_change(img1: np.ndarray, img2: np.ndarray, threshold: flo
 def classify_accumulated_abs_change(acc_map: np.ndarray, threshold: float):
     """窓合算 |diff| を二値化。変化は両方向とも黒（increased にまとめる）。"""
     changed = acc_map > threshold
+    unchanged = ~changed
+    increased = changed
+    decreased = np.zeros_like(changed, dtype=bool)
+    return increased, decreased, unchanged
+
+
+def classify_stat_change(stat_map: np.ndarray, threshold: float):
+    changed = stat_map > threshold
     unchanged = ~changed
     increased = changed
     decreased = np.zeros_like(changed, dtype=bool)
@@ -266,8 +285,125 @@ def process_directory_accum(
     return True
 
 
+def process_directory_stat(
+    target_dir: Path,
+    colors,
+    threshold: float,
+    stat_kind: str,
+    output_subdir: str = "",
+) -> bool:
+    """120フレーム時系列の各ピクセル統計（std/var）を二値化して1枚出力。"""
+    image_paths = sort_indexed_paths(list(target_dir.glob(IMAGE_PATTERN)))
+    if not image_paths:
+        return False
+
+    cache = {}
+
+    def get_image(path: Path):
+        if path not in cache:
+            cache[path] = load_image_as_rgb(path, QUALITY_SCALE, RESIZE_METHOD)
+        return cache[path]
+
+    series: List[np.ndarray] = []
+    base_shape = None
+    for path in image_paths:
+        img = get_image(path)
+        if base_shape is None:
+            base_shape = img.shape
+        elif img.shape != base_shape:
+            raise ValueError(f"画像サイズが一致しません: {path.name} {img.shape} vs {base_shape}")
+        series.append(compute_max_channel_signal(img))
+
+    if not series:
+        return True
+
+    stack = np.stack(series, axis=0)
+    if stat_kind == "var":
+        stat_map = np.var(stack, axis=0)
+    else:
+        stat_map = np.std(stack, axis=0)
+
+    increased, decreased, unchanged = classify_stat_change(stat_map, threshold)
+    output_dir = resolve_output_dir(target_dir, output_subdir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    first = image_paths[0]
+    last = image_paths[-1]
+    pair_name = build_pair_folder_name(first, last)
+    output_path = output_dir / f"{pair_name}_rgbmax_scale{QUALITY_SCALE:.2f}.png"
+    save_combined_map(increased, decreased, unchanged, colors, output_path)
+
+    th255 = threshold * 255.0
+    print(
+        f"\n[{target_dir.name}] stat={stat_kind} frames={len(image_paths)} "
+        f"threshold={th255:.0f}/255 ({threshold:.6f}) -> {output_path.name}"
+    )
+    print(f"[{target_dir.name}] 完了。出力先: {output_dir.resolve()}")
+    return True
+
+
+def process_directory_fourier(
+    target_dir: Path,
+    colors,
+    threshold: float,
+    fps: float,
+    target_freq: float,
+    band_radius: int,
+    output_subdir: str = "",
+) -> bool:
+    """120フレーム時系列の時間軸FFTスコアマップを二値化して1枚出力。"""
+    from time_fft import build_score_map, normalize_score_map
+
+    image_paths = sort_indexed_paths(list(target_dir.glob(IMAGE_PATTERN)))
+    if not image_paths:
+        return False
+
+    cache = {}
+
+    def get_image(path: Path):
+        if path not in cache:
+            cache[path] = load_image_as_rgb(path, QUALITY_SCALE, RESIZE_METHOD)
+        return cache[path]
+
+    series: List[np.ndarray] = []
+    base_shape = None
+    for path in image_paths:
+        img = get_image(path)
+        if base_shape is None:
+            base_shape = img.shape
+        elif img.shape != base_shape:
+            raise ValueError(f"画像サイズが一致しません: {path.name} {img.shape} vs {base_shape}")
+        series.append(compute_max_channel_signal(img))
+
+    if not series:
+        return True
+
+    stack = np.stack(series, axis=0)
+    score_map = build_score_map(stack, fps, target_freq, band_radius=band_radius)
+    norm_map = normalize_score_map(score_map)
+
+    increased, decreased, unchanged = classify_stat_change(norm_map, threshold)
+    output_dir = resolve_output_dir(target_dir, output_subdir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    first = image_paths[0]
+    last = image_paths[-1]
+    pair_name = build_pair_folder_name(first, last)
+    output_path = output_dir / f"{pair_name}_rgbmax_scale{QUALITY_SCALE:.2f}.png"
+    save_combined_map(increased, decreased, unchanged, colors, output_path)
+
+    th255 = threshold * 255.0
+    print(
+        f"\n[{target_dir.name}] fourier target={target_freq:.3f}Hz fps={fps:.3f} "
+        f"frames={len(image_paths)} threshold={th255:.0f}/255 ({threshold:.6f}) "
+        f"-> {output_path.name}"
+    )
+    print(f"[{target_dir.name}] 完了。出力先: {output_dir.resolve()}")
+    return True
+
+
 def main():
-    parser = argparse.ArgumentParser(description="frame_*.png の差分マップを生成する（pair / accum）")
+    parser = argparse.ArgumentParser(description="frame_*.png の差分マップを生成する（pair / accum / stat / fourier）")
     parser.add_argument(
         "--base-dir",
         type=str,
@@ -277,15 +413,22 @@ def main():
     parser.add_argument(
         "--diff-mode",
         type=str,
-        choices=["pair", "accum"],
+        choices=["pair", "accum", "stat", "fourier"],
         default="pair",
-        help="差分モード: pair=隣接ペア（既定） / accum=非重複窓の|差分|合算",
+        help="差分モード: pair=隣接ペア / accum=非重複窓|差分|合算 / stat=時間方向統計 / fourier=時間軸FFT",
     )
     parser.add_argument(
         "--window-n",
         type=int,
         default=4,
         help="accum 時の窓長（フレーム数）。既定: 4",
+    )
+    parser.add_argument(
+        "--stat-kind",
+        type=str,
+        choices=["std", "var"],
+        default="std",
+        help="stat 時の統計量: std（既定） or var",
     )
     parser.add_argument(
         "--threshold",
@@ -298,6 +441,24 @@ def main():
         type=str,
         default="",
         help="差分の出力サブディレクトリ名（未指定時: rgb_max_diff_maps）",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=60.0,
+        help="fourier 時のカメラ fps（既定: 60）",
+    )
+    parser.add_argument(
+        "--target-freq",
+        type=float,
+        default=30.0,
+        help="fourier 時のターゲット周波数 Hz（既定: 30）",
+    )
+    parser.add_argument(
+        "--band-radius",
+        type=int,
+        default=1,
+        help="fourier 時の target_idx 前後ビン数（既定: 1）",
     )
     args = parser.parse_args()
 
@@ -330,6 +491,24 @@ def main():
                     colors,
                     threshold=threshold,
                     window_n=window_n,
+                    output_subdir=output_subdir,
+                )
+            elif args.diff_mode == "stat":
+                ok = process_directory_stat(
+                    target_dir,
+                    colors,
+                    threshold=threshold,
+                    stat_kind=str(args.stat_kind),
+                    output_subdir=output_subdir,
+                )
+            elif args.diff_mode == "fourier":
+                ok = process_directory_fourier(
+                    target_dir,
+                    colors,
+                    threshold=threshold,
+                    fps=float(args.fps),
+                    target_freq=float(args.target_freq),
+                    band_radius=int(args.band_radius),
                     output_subdir=output_subdir,
                 )
             else:

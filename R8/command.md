@@ -195,6 +195,8 @@ cd R8\make_movie
 |---|---|---|
 | 隣接ペア（既定） | `pair` | th = 4, 8, 12 |
 | 窓合算 | `accum` | n = 3,4,5 × th = 12,16,24,32 |
+| 統計（時間方向） | `stat` | std: th = 4,8,12 / var: th = 1,2,4 |
+| 時間軸FFT | `fourier` | 第一候補+半分の2周波数 × th = 4,8,12 |
 
 ### 2.2 QR探索モード
 
@@ -209,11 +211,14 @@ cd R8\make_movie
 | 保存パターン | `--max-frames` | 意味 |
 |---|---|---|
 | 全部残す（既定） | `120` | 再デコード・目視向け |
+| 先頭+末尾だけ残す | `2` | まずは端点だけ確認したい（差分計算は常に120枚分） |
 | 1枚だけ残す | `1` | ディスク節約（差分計算は常に120枚分） |
 
 ---
 
 ### 2.4 pair（標準）
+
+`pair` は重くなりやすいため、既定で **decode は全ペア実施**しつつ、保存する差分PNGは **成功ペア + 最高accuracyペア + 10枚に1枚** に間引かれます。全件は `qr_decode_all_frames.csv` で確認します。
 
 **パターン:** pair + fast + 120枚残す（いちばん標準）
 
@@ -243,6 +248,12 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1 --mid-search
+```
+
+**パターン:** pair + fast + 先頭+末尾2枚だけ残す
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 2
 ```
 
 **パターン:** pair の閾値スイープを上書き（例: 8 と 12 だけ）
@@ -299,7 +310,65 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 
 ---
 
-### 2.6 他動画への差し替え例
+### 2.6 stat（統計）
+
+**パターン:** stat(std) + fast + 既定スイープ
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode stat
+```
+
+**パターン:** stat(var) + fast + 既定スイープ
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode stat --stat-kind var
+```
+
+**パターン:** stat(std) + mid
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode stat --mid-search
+```
+
+**パターン:** stat(var) + 閾値スイープ上書き
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode stat --stat-kind var --diff-thresholds 1,3,5
+```
+
+---
+
+### 2.7 fourier（時間軸FFT）
+
+ターゲット周波数は動画名の `rate_hz` とカメラ fps から **第一候補 + その半分** を自動算出（例: r180→30,15 Hz / r45→22.5,11.25 Hz / r120→30,15 Hz）。
+
+**パターン:** fourier + mid + 既定スイープ（2周波数 × th=4,8,12）
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode fourier --mid-search
+```
+
+**パターン:** fourier + 先頭+末尾2枚だけ残す
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode fourier --mid-search --max-frames 2
+```
+
+**パターン:** fourier + 周波数手動指定（r90 → 15 Hz と 7.5 Hz）
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r90_e250_f1.mp4 --manifest R8/make_movie/manifests/r90_e250.json --diff-mode fourier --target-freqs 15,7.5 --mid-search
+```
+
+**パターン:** fourier + 閾値スイープ上書き
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode fourier --diff-thresholds 4,12
+```
+
+---
+
+### 2.8 他動画への差し替え例
 
 **パターン:** 60Hz / 露光1/125 / 蛍光灯なし / pair+fast
 
@@ -329,6 +398,24 @@ python R8/analyze_code/cal-from-2frame-RGB-oute.py --base-dir R8/analyze_code/ou
 
 ```bash
 python R8/analyze_code/cal-from-2frame-RGB-oute.py --base-dir R8/analyze_code/out/r180_e250_f1/rice_R_4 --diff-mode accum --window-n 4 --threshold 16 --output-subdir rgb_max_accum_n4_th16
+```
+
+**パターン:** stat(std) / th=4
+
+```bash
+python R8/analyze_code/cal-from-2frame-RGB-oute.py --base-dir R8/analyze_code/out/r180_e250_f1/rice_R_4 --diff-mode stat --stat-kind std --threshold 4 --output-subdir rgb_max_stat_std_th4
+```
+
+**パターン:** stat(var) / th=1
+
+```bash
+python R8/analyze_code/cal-from-2frame-RGB-oute.py --base-dir R8/analyze_code/out/r180_e250_f1/rice_R_4 --diff-mode stat --stat-kind var --threshold 1 --output-subdir rgb_max_stat_var_th1
+```
+
+**パターン:** fourier / 30Hz / th=8
+
+```bash
+python R8/analyze_code/cal-from-2frame-RGB-oute.py --base-dir R8/analyze_code/out/r180_e250_f1/rice_R_4 --diff-mode fourier --fps 59.94 --target-freq 30 --threshold 8 --output-subdir rgb_max_fourier_f30_th8
 ```
 
 ### 3.2 デコードだけやり直す
@@ -374,8 +461,44 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | 標準解析 | （フラグなし）= pair + fast + max-frames 120 |
 | 読み取り強化 | `--mid-search` または `--full-search` |
 | 窓合算 | `--diff-mode accum` |
+| 統計解析 | `--diff-mode stat`（`--stat-kind var` で分散） |
+| 時間軸FFT | `--diff-mode fourier`（`--target-freqs 15,7.5` で周波数上書き） |
 | accum を軽く | `--diff-mode accum --window-ns 4 --diff-thresholds 16,24,32` |
 | ディスク節約 | `--max-frames 1` |
+| 端点確認 | `--max-frames 2` |
+
+`pair` の差分PNGは既定で間引き保存されるため、目視用PNGが少なくても全件判定が減ったわけではありません。全件詳細は `qr_decode_all_frames.csv` を見ます。
 
 出力先: `R8/analyze_code/out/<動画stem>/`  
 （`results.csv`, `qr_decode_all_frames.csv`, 条件フォルダ, `rgb_max_diff_maps_th*` / `rgb_max_accum_n*_th*`）
+
+---
+
+## 4. 一括解析（all_analyze）
+
+`R8/movie` 内の命名規則に合う動画を、順番に `run_pipeline.py` で全部解析します。1本失敗しても続行します。
+
+```bash
+python R8/analyze_code/all_analyze.py
+```
+
+**既定:** `pair` + `--mid-search` + `--max-frames 120`  
+manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動解決します。
+
+**例:**
+
+```bash
+# 端点2枚だけ残して一括
+python R8/analyze_code/all_analyze.py --max-frames 2
+
+# accum で一括
+python R8/analyze_code/all_analyze.py --diff-mode accum
+
+# fourier で一括
+python R8/analyze_code/all_analyze.py --diff-mode fourier --mid-search --max-frames 2
+
+# mid を外して軽く
+python R8/analyze_code/all_analyze.py --no-mid-search --max-frames 1
+```
+
+サマリー: `R8/analyze_code/out/all_analyze_summary.csv`

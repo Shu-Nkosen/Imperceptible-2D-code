@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from naming import VideoNameMeta, parse_video_name
+from time_fft import format_freq_label, resolve_target_freqs
 
 
 @dataclass(frozen=True)
@@ -38,9 +39,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--max-frames",
         type=int,
-        choices=[1, 120],
+        choices=[1, 2, 120],
         default=120,
-        help="解析後に残す frame_*.png の枚数（1 or 120）。差分計算は常に120フレーム分。既定: 120",
+        help="解析後に残す frame_*.png の枚数（1/2/120）。差分計算は常に120フレーム分。既定: 120。"
+        " 1=中間1枚、2=先頭+末尾2枚、120=全部",
     )
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
     p.add_argument("--workers", type=int, default=1, help="passed to decode_qr_from_all_frames.py")
@@ -57,9 +59,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--diff-mode",
         type=str,
-        choices=["pair", "accum"],
+        choices=["pair", "accum", "stat", "fourier"],
         default="pair",
-        help="差分モード: pair=隣接ペア（既定） / accum=非重複窓の|差分|合算",
+        help="差分モード: pair=隣接ペア（既定） / accum=非重複窓の|差分|合算 / stat=時間方向統計 / fourier=時間軸FFT",
+    )
+    p.add_argument(
+        "--stat-kind",
+        type=str,
+        choices=["std", "var"],
+        default="std",
+        help="diff-mode=stat 時の統計量（std or var）。既定: std",
     )
     p.add_argument(
         "--window-ns",
@@ -71,7 +80,19 @@ def parse_args() -> argparse.Namespace:
         "--diff-thresholds",
         type=str,
         default="",
-        help="差分閾値スイープ（カンマ区切り）。未指定時: pair=4,8,12 / accum=12,16,24,32",
+        help="差分閾値スイープ（カンマ区切り）。未指定時: pair=4,8,12 / accum=12,16,24,32 / stat=std:4,8,12 var:1,2,4 / fourier=4,8,12",
+    )
+    p.add_argument(
+        "--target-freqs",
+        type=str,
+        default="",
+        help="fourier 時のターゲット周波数 Hz（カンマ区切り）。未指定時は rate_hz+fps から第一候補+半分を自動算出",
+    )
+    p.add_argument(
+        "--fourier-band-radius",
+        type=int,
+        default=1,
+        help="fourier 時の target_idx 前後ビン数（既定: 1）",
     )
     return p.parse_args()
 
@@ -88,6 +109,21 @@ def parse_int_list(raw: str, default: Tuple[int, ...]) -> Tuple[int, ...]:
         values.append(int(part))
     if not values:
         raise SystemExit(f"空の整数リストです: {raw!r}")
+    return tuple(values)
+
+
+def parse_float_list(raw: str, default: Tuple[float, ...]) -> Tuple[float, ...]:
+    text = (raw or "").strip()
+    if not text:
+        return default
+    values: List[float] = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        values.append(float(part))
+    if not values:
+        raise SystemExit(f"空の浮動小数リストです: {raw!r}")
     return tuple(values)
 
 def robust_fps(cap: cv2.VideoCapture) -> float:
@@ -335,6 +371,101 @@ def pixel_accuracy_for_folder(rows: List[Dict[str, str]], folder: str) -> Tuple[
     return pixel_acc_all, pixel_acc_ok
 
 
+def _parse_diff_pair_from_name(path: Path) -> Optional[Tuple[int, int]]:
+    match = re.match(r"(\d+)-(\d+)-", path.stem)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _parse_pair_key_from_row(row: Dict[str, str]) -> Optional[Tuple[int, int]]:
+    try:
+        left = int(str(row.get("frame_1") or "").strip())
+        right = int(str(row.get("frame_2") or "").strip())
+    except ValueError:
+        return None
+    return tuple(sorted((left, right)))
+
+
+def select_keep_diff_images(
+    rows_for_folder: List[Dict[str, str]],
+    diff_dir: Path,
+    stride: int = 10,
+) -> Tuple[set[Path], Dict[str, int]]:
+    paths = sorted(
+        [p for p in diff_dir.glob("*_rgbmax_scale*.png") if _parse_diff_pair_from_name(p) is not None],
+        key=lambda p: _parse_diff_pair_from_name(p) or (10**9, 10**9),
+    )
+    if not paths:
+        return set(), {"success": 0, "best_acc": 0, "stride": 0}
+
+    keep_set: set[Path] = set()
+    pair_to_path: Dict[Tuple[int, int], Path] = {}
+    for path in paths:
+        pair = _parse_diff_pair_from_name(path)
+        if pair is not None:
+            pair_to_path[pair] = path
+
+    success_count = 0
+    for row in rows_for_folder:
+        ok = str(row.get("success", "")).strip() in ("1", "True", "true")
+        if not ok:
+            continue
+        pair = _parse_pair_key_from_row(row)
+        if pair is None:
+            continue
+        target = pair_to_path.get(pair)
+        if target is not None:
+            keep_set.add(target)
+            success_count += 1
+
+    best_acc_path: Optional[Path] = None
+    best_acc: Optional[float] = None
+    for row in rows_for_folder:
+        acc = _parse_accuracy(row.get("accuracy"))
+        if acc is None:
+            continue
+        pair = _parse_pair_key_from_row(row)
+        if pair is None:
+            continue
+        target = pair_to_path.get(pair)
+        if target is None:
+            continue
+        if best_acc is None or acc > best_acc:
+            best_acc = acc
+            best_acc_path = target
+    if best_acc_path is not None:
+        keep_set.add(best_acc_path)
+
+    stride_count = 0
+    stride = max(1, int(stride))
+    for idx, path in enumerate(paths):
+        if idx % stride == 0:
+            keep_set.add(path)
+            stride_count += 1
+
+    return keep_set, {
+        "success": success_count,
+        "best_acc": 1 if best_acc_path is not None else 0,
+        "stride": stride_count,
+    }
+
+
+def prune_diff_images(diff_dir: Path, keep_set: set[Path]) -> Tuple[int, int]:
+    paths = sorted(diff_dir.glob("*_rgbmax_scale*.png"))
+    if not paths:
+        return 0, 0
+    removed = 0
+    kept = 0
+    for path in paths:
+        if path in keep_set:
+            kept += 1
+            continue
+        path.unlink(missing_ok=True)
+        removed += 1
+    return kept, removed
+
+
 def format_common_meta(
     video_name: str,
     meta: Optional[VideoNameMeta],
@@ -365,6 +496,8 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "decode_variant",
     "diff_mode",
     "window_n",
+    "stat_kind",
+    "fft_target_hz",
     "diff_threshold",
     "pixel_acc_all",
     "pixel_acc_ok",
@@ -390,6 +523,9 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
 # 差分二値化閾値の既定スイープ（0-255 dual）
 DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 8, 12)
 DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (12, 16, 24, 32)
+DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
+DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4)
+DIFF_THRESHOLDS_FOURIER: Tuple[int, ...] = (4, 8, 12)
 WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 4, 5)
 # GT QR 挿入位置（present_session.c と同じ: before cond 0 / 30 / after last）
 DEFAULT_GT_QR_INSERT_BEFORE: Tuple[int, ...] = (0, 30, 60)
@@ -712,20 +848,48 @@ def main() -> None:
     all_decode_rows: List[Dict[str, str]] = []
 
     diff_mode = str(ns.diff_mode)
+    stat_kind = str(ns.stat_kind) if diff_mode == "stat" else ""
+    target_freqs: Tuple[float, ...] = ()
+    fourier_band_radius = int(ns.fourier_band_radius)
     if diff_mode == "accum":
         window_ns = parse_int_list(ns.window_ns, WINDOW_NS_ACCUM)
         if any(n < 2 for n in window_ns):
             raise SystemExit("--window-ns の各値は 2 以上である必要があります")
         diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_ACCUM)
-        sweep: List[Tuple[Optional[int], int]] = [(n, th) for n in window_ns for th in diff_thresholds]
+        sweep: List[Tuple[Optional[int], Optional[float], int]] = [
+            (n, None, th) for n in window_ns for th in diff_thresholds
+        ]
+    elif diff_mode == "stat":
+        window_ns = ()
+        default_stat_th = DIFF_THRESHOLDS_STAT_VAR if stat_kind == "var" else DIFF_THRESHOLDS_STAT_STD
+        diff_thresholds = parse_int_list(ns.diff_thresholds, default_stat_th)
+        sweep = [(None, None, th) for th in diff_thresholds]
+    elif diff_mode == "fourier":
+        window_ns = ()
+        diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_FOURIER)
+        if ns.target_freqs.strip():
+            target_freqs = parse_float_list(ns.target_freqs, ())
+        elif meta is not None:
+            target_freqs = tuple(resolve_target_freqs(meta.rate_hz, fps))
+        else:
+            raise SystemExit(
+                "fourier 解析には動画名から rate_hz を読むか --target-freqs を指定してください"
+            )
+        sweep = [(None, freq, th) for freq in target_freqs for th in diff_thresholds]
+        print(
+            f"[INFO] fourier target_freqs={[f'{f:.3f}' for f in target_freqs]} "
+            f"band_radius={fourier_band_radius} camera_fps={fps:.4f}"
+        )
     else:
         window_ns = ()
         diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_PAIR)
-        sweep = [(None, th) for th in diff_thresholds]
+        sweep = [(None, None, th) for th in diff_thresholds]
 
     print(
         f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
         f"/ diff_mode={diff_mode} "
+        f"/ stat_kind={(stat_kind if stat_kind else '-')} "
+        f"/ target_freqs={([f'{f:.3f}' for f in target_freqs] if target_freqs else '-')} "
         f"/ window_ns={list(window_ns) if window_ns else '-'} "
         f"/ diff_thresholds={list(diff_thresholds)} "
         "/ results+decode CSV overwritten after each condition (accumulated)"
@@ -763,18 +927,20 @@ def main() -> None:
         best_dec: Dict[str, str] = {}
         best_th: Optional[int] = None
         best_window_n: Optional[int] = None
+        best_fft_freq: Optional[float] = None
         best_rows: List[Dict[str, str]] = []
         folder_decode_rows: List[Dict[str, str]] = []
-        # (window_n, th, decode_row, rows, pixel_acc_ok)
+        # (window_n, fft_freq, th, decode_row, rows, pixel_acc_ok, freq_rank)
         success_candidates: List[
-            Tuple[Optional[int], int, Dict[str, str], List[Dict[str, str]], float]
+            Tuple[Optional[int], Optional[float], int, Dict[str, str], List[Dict[str, str]], float, int]
         ] = []
+        freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
 
         if analyzed <= 0:
             decode_note = "extract失敗: 0 frames"
             print(f"[WARN] {folder_name}: {decode_note}")
         else:
-            for win_n, th in sweep:
+            for win_n, fft_freq, th in sweep:
                 if diff_mode == "accum":
                     assert win_n is not None
                     diff_subdir = f"rgb_max_accum_n{win_n}_th{th}"
@@ -789,6 +955,48 @@ def main() -> None:
                         "accum",
                         "--window-n",
                         str(win_n),
+                        "--threshold",
+                        str(th),
+                        "--output-subdir",
+                        diff_subdir,
+                    ]
+                elif diff_mode == "stat":
+                    diff_subdir = f"rgb_max_stat_{stat_kind}_th{th}"
+                    print(
+                        f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: "
+                        f"stat kind={stat_kind} threshold={th}"
+                    )
+                    diff_args = [
+                        "--base-dir",
+                        cond_dir_abs,
+                        "--diff-mode",
+                        "stat",
+                        "--stat-kind",
+                        stat_kind,
+                        "--threshold",
+                        str(th),
+                        "--output-subdir",
+                        diff_subdir,
+                    ]
+                elif diff_mode == "fourier":
+                    assert fft_freq is not None
+                    freq_label = format_freq_label(fft_freq)
+                    diff_subdir = f"rgb_max_fourier_{freq_label}_th{th}"
+                    print(
+                        f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: "
+                        f"fourier target={fft_freq:.3f}Hz threshold={th}"
+                    )
+                    diff_args = [
+                        "--base-dir",
+                        cond_dir_abs,
+                        "--diff-mode",
+                        "fourier",
+                        "--fps",
+                        str(fps),
+                        "--target-freq",
+                        str(fft_freq),
+                        "--band-radius",
+                        str(fourier_band_radius),
                         "--threshold",
                         str(th),
                         "--output-subdir",
@@ -811,7 +1019,12 @@ def main() -> None:
                 try:
                     run_py(diff_script, cwd=out_root, args=diff_args)
                 except subprocess.CalledProcessError as exc:
-                    label = f"n={win_n} th={th}" if win_n is not None else f"th={th}"
+                    if win_n is not None:
+                        label = f"n={win_n} th={th}"
+                    elif fft_freq is not None:
+                        label = f"freq={fft_freq:.3f} th={th}"
+                    else:
+                        label = f"th={th}"
                     print(f"[WARN] {folder_name}: diff失敗 {label} exit={exc.returncode}")
                     continue
 
@@ -833,7 +1046,12 @@ def main() -> None:
                 try:
                     run_py(decode_script, cwd=out_root, args=decode_args)
                 except subprocess.CalledProcessError as exc:
-                    label = f"n={win_n} th={th}" if win_n is not None else f"th={th}"
+                    if win_n is not None:
+                        label = f"n={win_n} th={th}"
+                    elif fft_freq is not None:
+                        label = f"freq={fft_freq:.3f} th={th}"
+                    else:
+                        label = f"th={th}"
                     print(f"[WARN] {folder_name}: decode失敗 {label} exit={exc.returncode}")
                     continue
 
@@ -843,47 +1061,78 @@ def main() -> None:
                     row_th = dict(r)
                     row_th["diff_mode"] = diff_mode
                     row_th["window_n"] = "" if win_n is None else str(win_n)
+                    row_th["stat_kind"] = stat_kind if diff_mode == "stat" else ""
+                    row_th["fft_target_hz"] = "" if fft_freq is None else f"{fft_freq:.6f}"
                     row_th["diff_threshold"] = str(th)
                     tagged_rows.append(row_th)
                 folder_decode_rows.extend(tagged_rows)
+
+                if diff_mode == "pair":
+                    diff_dir = cond_dir / diff_subdir
+                    keep_set, keep_stats = select_keep_diff_images(th_rows, diff_dir, stride=10)
+                    kept, removed = prune_diff_images(diff_dir, keep_set)
+                    print(
+                        f"[INFO] {folder_name}: pair prune kept={kept} removed={removed} "
+                        f"(success={keep_stats['success']}, best_acc={keep_stats['best_acc']}, "
+                        f"stride={keep_stats['stride']})"
+                    )
 
                 dec_th = pick_decode_row_for_folder(th_rows, folder_name)
                 ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
                 if ok:
                     _, acc_ok = pixel_accuracy_for_folder(th_rows, folder_name)
                     acc_val = float(acc_ok) if acc_ok else -1.0
-                    success_candidates.append((win_n, th, dec_th, th_rows, acc_val))
-                    n_label = f"n={win_n} " if win_n is not None else ""
+                    freq_rank = freq_rank_map.get(fft_freq, 0) if fft_freq is not None else 0
+                    success_candidates.append((win_n, fft_freq, th, dec_th, th_rows, acc_val, freq_rank))
+                    if win_n is not None:
+                        n_label = f"n={win_n} "
+                    elif fft_freq is not None:
+                        n_label = f"freq={fft_freq:.3f}Hz "
+                    else:
+                        n_label = ""
                     print(
                         f"[OK] {folder_name}: success at {n_label}threshold={th} "
                         f"(pixel_acc_ok={acc_ok or 'n/a'})"
                     )
 
             if success_candidates:
-                # 成功のうち pixel_acc_ok 最大 → 小さい th → 小さい n
-                success_candidates.sort(
-                    key=lambda x: (-x[4], x[1], x[0] if x[0] is not None else 0)
-                )
-                best_window_n, best_th, best_dec, best_rows, _ = success_candidates[0]
-                n_label = f"n={best_window_n} " if best_window_n is not None else ""
+                # 成功のうち pixel_acc_ok 最大 → 小さい th → 第一候補周波数優先
+                success_candidates.sort(key=lambda x: (-x[5], x[2], x[6], x[0] if x[0] is not None else 0))
+                best_window_n, best_fft_freq, best_th, best_dec, best_rows, _, _ = success_candidates[0]
+                if best_window_n is not None:
+                    n_label = f"n={best_window_n} "
+                elif best_fft_freq is not None:
+                    n_label = f"freq={best_fft_freq:.3f}Hz "
+                else:
+                    n_label = ""
                 print(f"[OK] {folder_name}: selected {n_label}threshold={best_th}")
             elif folder_decode_rows:
                 last = folder_decode_rows[-1]
                 best_th = int(last.get("diff_threshold") or diff_thresholds[-1])
                 win_raw = str(last.get("window_n") or "").strip()
                 best_window_n = int(win_raw) if win_raw else None
+                fft_raw = str(last.get("fft_target_hz") or "").strip()
+                best_fft_freq = float(fft_raw) if fft_raw else None
                 best_rows = [
                     r
                     for r in folder_decode_rows
                     if r.get("diff_threshold") == str(best_th)
                     and r.get("window_n", "") == ("" if best_window_n is None else str(best_window_n))
+                    and r.get("fft_target_hz", "") == ("" if best_fft_freq is None else f"{best_fft_freq:.6f}")
                 ]
                 best_dec = pick_decode_row_for_folder(
                     [
                         {
                             k: v
                             for k, v in r.items()
-                            if k not in ("diff_threshold", "diff_mode", "window_n")
+                            if k
+                            not in (
+                                "diff_threshold",
+                                "diff_mode",
+                                "window_n",
+                                "stat_kind",
+                                "fft_target_hz",
+                            )
                         }
                         for r in best_rows
                     ],
@@ -921,6 +1170,8 @@ def main() -> None:
             "decode_variant": decode_variant if not decode_note_out else "",
             "diff_mode": diff_mode,
             "window_n": "" if best_window_n is None else str(best_window_n),
+            "stat_kind": stat_kind if diff_mode == "stat" else "",
+            "fft_target_hz": "" if best_fft_freq is None else f"{best_fft_freq:.6f}",
             "diff_threshold": "" if best_th is None else str(best_th),
             "pixel_acc_all": pixel_acc_all,
             "pixel_acc_ok": pixel_acc_ok,
