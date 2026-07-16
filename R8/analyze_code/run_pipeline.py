@@ -18,8 +18,8 @@ from naming import VideoNameMeta, parse_video_name
 class SyncConfig:
     min_black_frames: int = 5
     min_red_frames: int = 3
-    black_v_max: float = 0.3  # HSV V threshold
-    red_r_min: float = 0.5    # normalized mean R threshold
+    black_v_max: float = 0.4  # HSV V threshold
+    red_r_min: float = 0.6    # normalized mean R threshold
     red_g_max: float = 0.3
     red_b_max: float = 0.3
 
@@ -43,7 +43,16 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
     p.add_argument("--workers", type=int, default=1, help="passed to decode_qr_from_all_frames.py")
-    p.add_argument("--full-search", action="store_true", help="passed to decode_qr_from_all_frames.py")
+    p.add_argument(
+        "--mid-search",
+        action="store_true",
+        help="passed to decode_qr_from_all_frames.py (全バリアント+Multi、拡大なし)",
+    )
+    p.add_argument(
+        "--full-search",
+        action="store_true",
+        help="passed to decode_qr_from_all_frames.py (全バリアント+拡大+Multi)",
+    )
     return p.parse_args()
 
 
@@ -395,11 +404,13 @@ def main() -> None:
     diff_script = script_dir / "cal-from-2frame-RGB-oute.py"
     decode_script = script_dir / "decode_qr_from_all_frames.py"
     results_csv = out_root / "results.csv"
+    decode_csv = out_root / "qr_decode_all_frames.csv"
     results: List[Dict[str, Any]] = []
+    all_decode_rows: List[Dict[str, str]] = []
 
     print(
         f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
-        "/ results overwritten after each condition"
+        "/ results+decode CSV overwritten after each condition (accumulated)"
     )
 
     for i, cond in enumerate(conditions):
@@ -453,11 +464,19 @@ def main() -> None:
                 ]
                 if ns.full_search:
                     decode_args.append("--full-search")
+                elif ns.mid_search:
+                    decode_args.append("--mid-search")
                 try:
                     run_py(decode_script, cwd=out_root, args=decode_args)
                 except subprocess.CalledProcessError as exc:
                     decode_note = f"decode失敗: exit={exc.returncode}"
                     print(f"[WARN] {folder_name}: {decode_note}")
+                else:
+                    # decode は単条件で上書きするので、パイプライン側で全条件分を蓄積し直す
+                    new_rows = load_decode_csv(decode_csv)
+                    all_decode_rows = [r for r in all_decode_rows if r.get("folder") != folder_name]
+                    all_decode_rows.extend(new_rows)
+                    write_results_csv(decode_csv, all_decode_rows)
 
         kept = prune_saved_frames(cond_dir, keep_frames=int(ns.max_frames))
         info = {
@@ -477,9 +496,7 @@ def main() -> None:
         }
         print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
 
-        decode_csv = out_root / "qr_decode_all_frames.csv"
-        decoded_rows = load_decode_csv(decode_csv)
-        dec = pick_decode_row_for_folder(decoded_rows, folder_name)
+        dec = pick_decode_row_for_folder(all_decode_rows, folder_name)
 
         row: Dict[str, Any] = {
             "video": video_path.name,
@@ -496,9 +513,13 @@ def main() -> None:
 
         results.append(row)
         write_results_csv(results_csv, results)
-        print(f"[OK] ({i+1}/{len(conditions)}) wrote {results_csv.name} ({len(results)} rows)")
+        print(
+            f"[OK] ({i+1}/{len(conditions)}) wrote {results_csv.name} ({len(results)} rows), "
+            f"{decode_csv.name} ({len(all_decode_rows)} decode rows)"
+        )
 
     print(f"[OK] results: {results_csv}")
+    print(f"[OK] decode: {decode_csv}")
 
 
 if __name__ == "__main__":

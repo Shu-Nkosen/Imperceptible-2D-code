@@ -39,6 +39,9 @@ FULL_VARIANT_ORDER = FAST_VARIANT_ORDER + (
 FAST_SCALES = (1.0,)
 FULL_SCALES = (1.0, 2.0, 3.0)
 
+# search mode: fast | mid | full
+# mid = full variants + Multi decode, scale 1.0 only (no enlarge)
+
 
 def parse_kernel_list(text: str) -> List[int]:
     kernels: List[int] = []
@@ -366,11 +369,29 @@ def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: boo
     return None
 
 
+def resolve_search_mode(mid_search: bool, full_search: bool) -> str:
+    if full_search and mid_search:
+        print("[WARN] --full-search と --mid-search が両方指定されています。full-search を優先します。")
+    if full_search:
+        return "full"
+    if mid_search:
+        return "mid"
+    return "fast"
+
+
+def search_mode_params(mode: str) -> Tuple[Tuple[str, ...], Tuple[float, ...], bool]:
+    if mode == "full":
+        return FULL_VARIANT_ORDER, FULL_SCALES, True
+    if mode == "mid":
+        return FULL_VARIANT_ORDER, FAST_SCALES, True
+    return FAST_VARIANT_ORDER, FAST_SCALES, False
+
+
 def decode_qr_from_diff(
     diff_path: Path,
     median_kernel: int,
     median_iterations: int,
-    full_search: bool,
+    search_mode: str,
 ) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
     gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
     if gray is None:
@@ -380,9 +401,7 @@ def decode_qr_from_diff(
     detector = cv2.QRCodeDetector()
     last_target: Optional[np.ndarray] = None
 
-    variant_order = FULL_VARIANT_ORDER if full_search else FAST_VARIANT_ORDER
-    scales = FULL_SCALES if full_search else FAST_SCALES
-    allow_multi = full_search
+    variant_order, scales, allow_multi = search_mode_params(search_mode)
 
     for variant_tag, target in iter_variant_targets(gray, median_gray, variant_order, scales):
         last_target = target
@@ -401,7 +420,7 @@ def decode_qr_with_kernel_candidates(
     diff_path: Path,
     kernel_candidates: List[int],
     median_iterations: int,
-    full_search: bool,
+    search_mode: str,
 ) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
     last_target: Optional[np.ndarray] = None
     for kernel in kernel_candidates:
@@ -409,7 +428,7 @@ def decode_qr_with_kernel_candidates(
             diff_path,
             kernel,
             median_iterations,
-            full_search,
+            search_mode,
         )
         if used_img is not None:
             last_target = used_img
@@ -452,14 +471,14 @@ def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
     diff_path = Path(str(task["diff_path"]))
     kernel_candidates = [int(value) for value in task["kernel_candidates"]]
     median_iterations = int(task["median_iterations"])
-    full_search = bool(task["full_search"])
+    search_mode = str(task.get("search_mode") or "fast")
     gt_path_str = str(task.get("gt_path") or "")
 
     decoded_text, method, used_img = decode_qr_with_kernel_candidates(
         diff_path,
         kernel_candidates,
         median_iterations,
-        full_search,
+        search_mode,
     )
     ok = decoded_text is not None
 
@@ -496,7 +515,7 @@ def build_tasks(
     base_dir: Path,
     kernel_candidates: List[int],
     median_iterations: int,
-    full_search: bool,
+    search_mode: str,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
     tasks: List[Dict[str, object]] = []
     pre_rows: List[Dict[str, object]] = []
@@ -559,7 +578,7 @@ def build_tasks(
                     "diff_image": str(diff_path.relative_to(base_dir)),
                     "kernel_candidates": kernel_candidates,
                     "median_iterations": median_iterations,
-                    "full_search": full_search,
+                    "search_mode": search_mode,
                     "gt_path": gt_path_str,
                 }
             )
@@ -625,9 +644,14 @@ def main() -> None:
         help="メディアンフィルタ反復回数（0で無効）",
     )
     parser.add_argument(
+        "--mid-search",
+        action="store_true",
+        help="全バリアント×Multi decode（拡大なし・scale 1.0のみ）。full より速い中間探索",
+    )
+    parser.add_argument(
         "--full-search",
         action="store_true",
-        help="全バリアント×全スケール×Multi decodeで徹底探索（遅い）",
+        help="全バリアント×全スケール(1/2/3)×Multi decodeで徹底探索（遅い）",
     )
     parser.add_argument(
         "--workers",
@@ -657,10 +681,10 @@ def main() -> None:
         kernel_candidates = [median_kernel]
     workers = max(1, args.workers)
     save_analysis = not args.no_save_analysis
+    search_mode = resolve_search_mode(args.mid_search, args.full_search)
 
-    mode = "full-search" if args.full_search else "fast"
     print(
-        f"[INFO] mode: {mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
+        f"[INFO] mode: {search_mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
         f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers}"
     )
 
@@ -692,7 +716,7 @@ def main() -> None:
         base_dir,
         kernel_candidates,
         median_iterations,
-        args.full_search,
+        search_mode,
     )
 
     total = len(tasks)

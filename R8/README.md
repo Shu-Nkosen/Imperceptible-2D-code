@@ -37,13 +37,44 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 ### 実行
 
-事前に **Windowsのディスプレイ設定でリフレッシュレートを target Hz に設定**してから実行します（特に120Hz）。
+事前に **Windowsのディスプレイ設定でリフレッシュレートを下表のとおり設定**してから実行します（特に120Hzは OS 側の切替が必須）。
+
+実効表示レートは概ね `モニタHz ÷ interval` です。`--rate` はマニフェスト／動画命名用の記録で、実際の点滅は `interval` と OS のリフレッシュで決まります。起動ログの `monitor_hz=... interval=... => fps~...` で確認してください。
+
+#### 表示Hzごとの手動設定
+
+| 実験レート | OSディスプレイ設定 | `--rate` | `--interval` | 実効 fps |
+|---|---|---|---|---|
+| **180 Hz** | **180 Hz** | `180` | `1` | ≈180 |
+| **120 Hz** | **120 Hz**（ここだけ OS を切替） | `120` | `1` | ≈120 |
+| **90 Hz** | 180 Hz のまま | `90` | `2` | ≈90 |
+| **60 Hz** | 180 Hz のまま | `60` | `3` | ≈60 |
+| **45 Hz** | 180 Hz のまま | `45` | `4` | ≈45 |
+
+撮影側で人が毎回合わせるもの（CLIには出さない）:
+
+- **蛍光灯** ON/OFF → 動画名の `f1` / `f0`
+- **露光** `1/250` `1/125` `1/60` → `--exp` と動画名の `e250` 等（表示内容自体は変わらないが、マニフェストとファイル名を揃える）
+
+例（180Hz）:
 
 ```powershell
 .\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r180_e250.json
 ```
 
-- `--interval`: vsyncの間引き（例: 180Hzモニタで 90Hz相当なら `--interval 2`）
+例（60Hz・180Hzモニタのまま）:
+
+```powershell
+.\present_session.exe --rate 60 --exp 250 --interval 3 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r60_e250.json
+```
+
+例（120Hz・OSを120Hzにしてから）:
+
+```powershell
+.\present_session.exe --rate 120 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r120_e250.json
+```
+
+- `--interval`: vsyncの間引き（上表参照）
 - `--padding-sec`: 同期信号（黒→赤）の前後に入れる黒余白（秒）。PCの安定待ち用（既定: 5秒）
 - `--repeat`: normal/inv を切り替えるフレーム反復（1なら毎フレーム交互）
 
@@ -66,7 +97,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 差分計算は常に **120フレーム分** 行います。`--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
 
-解析後に120枚残す（既定）:
+解析後に120枚残す（既定・QR探索は fast）:
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
@@ -78,14 +109,34 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1
 ```
 
+QR探索を mid（拡大なしの中間探索）にする:
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --mid-search
+```
+
 - `--max-frames`: `120`（既定）または `1`（残すPNG枚数）。差分計算は常に120フレーム分
 - 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
+- QR探索モード（`decode_qr_from_all_frames.py` に渡る）:
+
+| フラグ | モード | 二値化バリアント | 拡大 (scale) | Multi decode |
+|---|---|---|---|---|
+| （なし） | **fast**（既定） | 6種 | 1.0 のみ | なし |
+| `--mid-search` | **mid** | 10種（全種） | 1.0 のみ | あり |
+| `--full-search` | **full** | 10種（全種） | 1.0 / 2.0 / 3.0 | あり |
+
+`--mid-search` は full から拡大だけ省いたモードです。両方指定した場合は `--full-search` が優先されます。
+既に切り出した条件フォルダだけ再デコードする場合の例:
+
+```bash
+python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/out/r180_e250_f1 --folder rice_R_4 --mid-search
+```
 
 出力先（デフォルト）:
 
 - `R8/analyze_code/out/r180_e250_f1/`
   - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
   - `rgb_max_diff_maps/`（各条件内。120フレームから作った差分）
-  - `qr_decode_all_frames.csv`（直近条件のデコード出力）
-  - `results.csv`（条件完了ごとに上書き更新される集約結果）
+  - `qr_decode_all_frames.csv`（全条件のデコード詳細。条件完了ごとに蓄積して上書き）
+  - `results.csv`（条件完了ごとに蓄積して上書きされる集約結果）
 
