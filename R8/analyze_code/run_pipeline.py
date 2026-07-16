@@ -330,6 +330,7 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "folder",
     "decode_note",
     "decode_variant",
+    "diff_threshold",
     "pixel_acc_all",
     "pixel_acc_ok",
     "video",
@@ -350,6 +351,9 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "analysis_frames",
     "extract_sec",
 )
+
+# 差分二値化閾値の総当たり（0-255 dual）。理想差分≈2×強度なので 4/8/12 を毎回試す
+DIFF_THRESHOLDS: Tuple[int, ...] = (4, 8, 12)
 
 # GT QR 挿入位置（present_session.c と同じ: before cond 0 / 30 / after last）
 DEFAULT_GT_QR_INSERT_BEFORE: Tuple[int, ...] = (0, 30, 60)
@@ -673,6 +677,7 @@ def main() -> None:
 
     print(
         f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
+        f"/ diff_thresholds={list(DIFF_THRESHOLDS)} "
         "/ results+decode CSV overwritten after each condition (accumulated)"
     )
 
@@ -705,22 +710,43 @@ def main() -> None:
             )
 
         decode_note = ""
+        best_dec: Dict[str, str] = {}
+        best_th: Optional[int] = None
+        best_rows: List[Dict[str, str]] = []
+        folder_decode_rows: List[Dict[str, str]] = []
+        success_candidates: List[Tuple[int, Dict[str, str], List[Dict[str, str]], float]] = []
+
         if analyzed <= 0:
             decode_note = "extract失敗: 0 frames"
             print(f"[WARN] {folder_name}: {decode_note}")
         else:
-            try:
-                run_py(diff_script, cwd=out_root, args=["--base-dir", cond_dir_abs])
-            except subprocess.CalledProcessError as exc:
-                decode_note = f"diff失敗: exit={exc.returncode}"
-                print(f"[WARN] {folder_name}: {decode_note}")
+            for th in DIFF_THRESHOLDS:
+                diff_subdir = f"rgb_max_diff_maps_th{th}"
+                print(f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: threshold={th}")
+                try:
+                    run_py(
+                        diff_script,
+                        cwd=out_root,
+                        args=[
+                            "--base-dir",
+                            cond_dir_abs,
+                            "--threshold",
+                            str(th),
+                            "--output-subdir",
+                            diff_subdir,
+                        ],
+                    )
+                except subprocess.CalledProcessError as exc:
+                    print(f"[WARN] {folder_name}: diff失敗 th={th} exit={exc.returncode}")
+                    continue
 
-            if not decode_note:
                 decode_args = [
                     "--base-dir",
                     out_root_abs,
                     "--folder",
                     folder_name,
+                    "--diff-subdir",
+                    diff_subdir,
                     "--workers",
                     str(int(ns.workers)),
                     "--no-save-analysis",
@@ -732,24 +758,55 @@ def main() -> None:
                 try:
                     run_py(decode_script, cwd=out_root, args=decode_args)
                 except subprocess.CalledProcessError as exc:
-                    decode_note = f"decode失敗: exit={exc.returncode}"
-                    print(f"[WARN] {folder_name}: {decode_note}")
-                else:
-                    # decode は単条件で上書きするので、パイプライン側で全条件分を蓄積し直す
-                    new_rows = load_decode_csv(decode_csv)
-                    all_decode_rows = [r for r in all_decode_rows if r.get("folder") != folder_name]
-                    all_decode_rows.extend(new_rows)
-                    write_csv(decode_csv, all_decode_rows)
+                    print(f"[WARN] {folder_name}: decode失敗 th={th} exit={exc.returncode}")
+                    continue
+
+                th_rows = [r for r in load_decode_csv(decode_csv) if r.get("folder") == folder_name]
+                tagged_rows: List[Dict[str, str]] = []
+                for r in th_rows:
+                    row_th = dict(r)
+                    row_th["diff_threshold"] = str(th)
+                    tagged_rows.append(row_th)
+                folder_decode_rows.extend(tagged_rows)
+
+                dec_th = pick_decode_row_for_folder(th_rows, folder_name)
+                ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
+                if ok:
+                    _, acc_ok = pixel_accuracy_for_folder(th_rows, folder_name)
+                    acc_val = float(acc_ok) if acc_ok else -1.0
+                    success_candidates.append((th, dec_th, th_rows, acc_val))
+                    print(f"[OK] {folder_name}: success at threshold={th} (pixel_acc_ok={acc_ok or 'n/a'})")
+
+            if success_candidates:
+                # 成功のうち pixel_acc_ok が最大のものを採用（同点なら小さい th）
+                success_candidates.sort(key=lambda x: (-x[3], x[0]))
+                best_th, best_dec, best_rows, _ = success_candidates[0]
+                print(f"[OK] {folder_name}: selected threshold={best_th}")
+            elif folder_decode_rows:
+                last_th = int(folder_decode_rows[-1].get("diff_threshold") or DIFF_THRESHOLDS[-1])
+                best_th = last_th
+                best_rows = [r for r in folder_decode_rows if r.get("diff_threshold") == str(last_th)]
+                # strip threshold key for metrics helpers that only need accuracy/success
+                best_dec = pick_decode_row_for_folder(
+                    [{k: v for k, v in r.items() if k != "diff_threshold"} for r in best_rows],
+                    folder_name,
+                )
+            else:
+                decode_note = "diff/decode失敗: 全threshold"
+                print(f"[WARN] {folder_name}: {decode_note}")
+
+            all_decode_rows = [r for r in all_decode_rows if r.get("folder") != folder_name]
+            all_decode_rows.extend(folder_decode_rows)
+            write_csv(decode_csv, all_decode_rows)
 
         kept = prune_saved_frames(cond_dir, keep_frames=int(ns.max_frames))
         print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
 
-        dec = pick_decode_row_for_folder(all_decode_rows, folder_name)
-        pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(all_decode_rows, folder_name)
+        dec = best_dec
+        pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(best_rows, folder_name)
         method = dec.get("method", "") if dec else ""
         decode_variant = parse_decode_variant(method) if method else ""
 
-        # decode_note: 成功時は空、失敗時は QR未検出 等（decode_success は出さない）
         if decode_note:
             decode_note_out = decode_note
         elif not dec:
@@ -764,6 +821,7 @@ def main() -> None:
             "folder": folder_name,
             "decode_note": decode_note_out,
             "decode_variant": decode_variant if not decode_note_out else "",
+            "diff_threshold": "" if best_th is None else str(best_th),
             "pixel_acc_all": pixel_acc_all,
             "pixel_acc_ok": pixel_acc_ok,
             "cond": i,

@@ -20,10 +20,11 @@ MAX_OFFSET = 1
 # ==============================
 
 
-def resolve_output_dir(base_dir: Path) -> Path:
-    if OUTPUT_DIR.is_absolute():
-        return OUTPUT_DIR
-    return base_dir / OUTPUT_DIR
+def resolve_output_dir(base_dir: Path, output_subdir: str = "") -> Path:
+    sub = Path(output_subdir) if output_subdir else OUTPUT_DIR
+    if sub.is_absolute():
+        return sub
+    return base_dir / sub
 
 def parse_color(color: Union[str, Tuple[float, float, float]]) -> Tuple[float, float, float]:
     if isinstance(color, tuple) and len(color) == 3:
@@ -133,7 +134,7 @@ def collect_candidate_pairs(image_paths: List[Path], max_offset: int):
             candidate_pairs.append((path1, path2))
     return candidate_pairs
 
-def process_directory(target_dir: Path, colors) -> bool:
+def process_directory(target_dir: Path, colors, threshold: float, output_subdir: str = "") -> bool:
     image_paths = sorted(target_dir.glob(IMAGE_PATTERN))
     if not image_paths:
         return False
@@ -143,7 +144,7 @@ def process_directory(target_dir: Path, colors) -> bool:
         print(f"[{target_dir.name}] 処理対象のペアがありません。")
         return True
 
-    output_dir = resolve_output_dir(target_dir)
+    output_dir = resolve_output_dir(target_dir, output_subdir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
     cache = {}
@@ -153,7 +154,11 @@ def process_directory(target_dir: Path, colors) -> bool:
             cache[path] = load_image_as_rgb(path, QUALITY_SCALE, RESIZE_METHOD)
         return cache[path]
 
-    print(f"\n[{target_dir.name}] {len(image_paths)}枚を検出。対象ペア {len(pairs)} 組を処理します。")
+    th255 = threshold * 255.0
+    print(
+        f"\n[{target_dir.name}] {len(image_paths)}枚を検出。対象ペア {len(pairs)} 組を処理します。"
+        f" threshold={th255:.0f}/255 ({threshold:.6f})"
+    )
     for idx, (path1, path2) in enumerate(pairs, 1):
         img1 = get_image(path1)
         img2 = get_image(path2)
@@ -161,7 +166,7 @@ def process_directory(target_dir: Path, colors) -> bool:
         if img1.shape != img2.shape:
             raise ValueError(f"画像サイズが一致しません: {path1.name} {img1.shape} vs {path2.name} {img2.shape}")
 
-        increased, decreased, unchanged, _ = classify_luminance_change(img1, img2, THRESHOLD)
+        increased, decreased, unchanged, _ = classify_luminance_change(img1, img2, threshold)
 
         pair_name = build_pair_folder_name(path1, path2)
         output_path = output_dir / f"{pair_name}_rgbmax_scale{QUALITY_SCALE:.2f}.png"
@@ -182,6 +187,18 @@ def main():
         default="",
         help="対象ルートの絶対パス（未指定時はカレントディレクトリ）",
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=4.0,
+        help="差分二値化閾値（0-255 dual。例: 4 → 4/255）。既定: 4",
+    )
+    parser.add_argument(
+        "--output-subdir",
+        type=str,
+        default="",
+        help="差分の出力サブディレクトリ名（未指定時: rgb_max_diff_maps）",
+    )
     args = parser.parse_args()
 
     colors = {
@@ -195,12 +212,15 @@ def main():
         raise FileNotFoundError(f"base-dir が存在しません: {base_dir}")
     print(f"[INFO] base_dir: {base_dir}")
 
+    threshold = float(args.threshold) / 255.0
+    output_subdir = args.output_subdir.strip() or str(OUTPUT_DIR)
+
     target_dirs = [base_dir] + sorted(path for path in base_dir.iterdir() if path.is_dir())
 
     processed_count = 0
     for target_dir in target_dirs:
         try:
-            if process_directory(target_dir, colors):
+            if process_directory(target_dir, colors, threshold=threshold, output_subdir=output_subdir):
                 processed_count += 1
         except Exception as exc:
             print(f"[WARN] {target_dir} の処理中にエラー: {exc}")

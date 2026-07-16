@@ -707,7 +707,17 @@ def main() -> None:
         default="",
         help="対象ルートの絶対パス（未指定時は本スクリプト配置ディレクトリ）",
     )
+    parser.add_argument(
+        "--diff-subdir",
+        type=str,
+        default="",
+        help="差分サブディレクトリ名（未指定時: rgb_max_diff_maps）",
+    )
     args = parser.parse_args()
+
+    global DIFF_SUBDIR
+    if args.diff_subdir.strip():
+        DIFF_SUBDIR = args.diff_subdir.strip()
 
     median_kernel = max(1, args.median_kernel)
     if median_kernel % 2 == 0:
@@ -727,7 +737,8 @@ def main() -> None:
 
     print(
         f"[INFO] mode: {search_mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
-        f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers}"
+        f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers} "
+        f"/ diff_subdir={DIFF_SUBDIR}"
     )
 
     if args.base_dir:

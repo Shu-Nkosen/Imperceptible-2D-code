@@ -102,7 +102,8 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 **条件ごとに差分・デコードまで回し、完了のたびに `results.csv` を上書き**します（途中まで残るのでデバッグしやすい）。
 `--manifest` を指定すると `slate_sec` / `padding_sec` を自動読み取りします（未指定時は slate=0.5秒、padding=5秒）。
 
-差分計算は常に **120フレーム分** 行います。`--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
+差分計算は常に **120フレーム分** 行います。差分の二値化閾値は毎回 **4 / 8 / 12** を総当たりし、デコード成功したもののうち `pixel_acc_ok` が最大の閾値を `results.csv` に採用します（同点なら小さい閾値）。
+`--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
 
 解析後に120枚残す（既定・QR探索は fast）:
 
@@ -144,7 +145,7 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 - `R8/analyze_code/out/r180_e250_f1/`
   - `frame_QR.png`（動画内のGT用QR表示から自動生成した正解マスク）
   - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
-  - `rgb_max_diff_maps/`（各条件内。120フレームから作った差分。ピクセル等倍の白黒PNG）
+  - `rgb_max_diff_maps_th4/` … `th12/`（各条件内。閾値ごとの差分）
   - `qr_decode_all_frames.csv`（全条件のデコード詳細。条件完了ごとに蓄積して上書き）
   - `results.csv`（条件完了ごとに蓄積して上書きされる集約結果）
 
@@ -155,6 +156,7 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | `folder` | 条件フォルダ名（例: `ex_R_8`） |
 | `decode_note` | 失敗理由。成功時は空（`decode_success` は出さない） |
 | `decode_variant` | 成功時に効いたバリアント名（例: `median_otsu`）。失敗時は空 |
+| `diff_threshold` | 採用した差分閾値（4 / 8 / 12）。毎回総当たりして選ぶ |
 | `pixel_acc_all` | 全差分ペアの画素 accuracy 平均（GT QR から作った `frame_QR.png` があるとき） |
 | `pixel_acc_ok` | デコード成功ペアだけの accuracy 平均（同上） |
 | `video` / `display_rate` / `exposure` / `fluorescent` / `camera_fps` | 動画共通メタ。**先頭行だけ**埋める（例: `180 Hz`, `1/250`, `蛍光灯あり`, `59.940 fps`） |
