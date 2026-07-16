@@ -1,7 +1,6 @@
 import argparse
 import re
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 from PIL import Image
 from typing import Tuple, Union, List
@@ -36,6 +35,13 @@ def parse_color(color: Union[str, Tuple[float, float, float]]) -> Tuple[float, f
     g = int(color[2:4], 16) / 255.0
     b = int(color[4:6], 16) / 255.0
     return (r, g, b)
+
+def color_to_uint8_rgb(color: Tuple[float, float, float]) -> Tuple[int, int, int]:
+    return (
+        int(round(float(color[0]) * 255.0)),
+        int(round(float(color[1]) * 255.0)),
+        int(round(float(color[2]) * 255.0)),
+    )
 
 def load_image_as_rgb(image_path: Path, scale=1.0, method="bilinear"):
     img = Image.open(image_path)
@@ -75,19 +81,16 @@ def classify_luminance_change(img1: np.ndarray, img2: np.ndarray, threshold: flo
     return increased, decreased, unchanged, diff_map
 
 def save_combined_map(increased, decreased, unchanged, colors, output_path: Path):
-    combined = np.zeros((*increased.shape, 3), dtype=np.float32)
-    combined[increased] = colors["increased"]
-    combined[decreased] = colors["decreased"]
-    combined[unchanged] = colors["unchanged"]
+    """差分マップをピクセル等倍のPNGで保存する（matplotlib余白なし）。
 
-    plt.figure(figsize=(10, 8))
-    plt.imshow(combined)
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"  保存: {output_path.name}")
-
+    以前の plt.savefig は余白・縮小が入るため、目視/スマホでは読めても
+    OpenCV の QRCodeDetector が失敗しやすかった。
+    """
+    rgb = np.empty((*increased.shape, 3), dtype=np.uint8)
+    rgb[unchanged] = color_to_uint8_rgb(colors["unchanged"])
+    rgb[increased] = color_to_uint8_rgb(colors["increased"])
+    rgb[decreased] = color_to_uint8_rgb(colors["decreased"])
+    Image.fromarray(rgb, mode="RGB").save(output_path)
 def parse_frame_info(stem: str):
     match_frame = re.match(r"frame_(\d+)", stem)
     if match_frame:

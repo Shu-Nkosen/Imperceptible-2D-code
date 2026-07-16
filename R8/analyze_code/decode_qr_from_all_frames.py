@@ -340,31 +340,61 @@ def iter_variant_targets(
             yield f"{variant_name}_x{scale:.1f}", target
 
 
+def trim_white_borders(gray: np.ndarray, white_min: int = 250) -> np.ndarray:
+    """matplotlib余白などが残っている差分画像の白縁を落とす。"""
+    if gray.ndim != 2 or gray.size == 0:
+        return gray
+    content = gray < white_min
+    if not np.any(content):
+        return gray
+    rows = np.any(content, axis=1)
+    cols = np.any(content, axis=0)
+    y0, y1 = int(np.argmax(rows)), int(len(rows) - np.argmax(rows[::-1]))
+    x0, x1 = int(np.argmax(cols)), int(len(cols) - np.argmax(cols[::-1]))
+    # わずかに余白を残す
+    pad = 8
+    y0 = max(0, y0 - pad)
+    x0 = max(0, x0 - pad)
+    y1 = min(gray.shape[0], y1 + pad)
+    x1 = min(gray.shape[1], x1 + pad)
+    if y1 - y0 < 16 or x1 - x0 < 16:
+        return gray
+    return gray[y0:y1, x0:x1]
+
+
 def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: bool) -> Optional[str]:
-    try:
-        ok, points = detector.detect(image)
-        if not ok or points is None:
-            if not allow_multi:
-                return None
-        else:
-            text, _ = detector.decode(image, points)
+    """OpenCV QR 読取。スマホより弱いので detectAndDecode も常に試す。"""
+    candidates = [image]
+    trimmed = trim_white_borders(image)
+    if trimmed is not image and trimmed.shape != image.shape:
+        candidates.append(trimmed)
+
+    for target in candidates:
+        try:
+            text, points, _ = detector.detectAndDecode(target)
             if text:
                 return text
-    except cv2.error:
-        if not allow_multi:
-            return None
+        except cv2.error:
+            pass
 
-    if not allow_multi:
-        return None
+        try:
+            ok, points = detector.detect(target)
+            if ok and points is not None:
+                text, _ = detector.decode(target, points)
+                if text:
+                    return text
+        except cv2.error:
+            pass
 
-    try:
-        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image)
-        if retval and decoded_info:
-            for value in decoded_info:
-                if value:
-                    return value
-    except cv2.error:
-        pass
+        if allow_multi:
+            try:
+                retval, decoded_info, _, _ = detector.detectAndDecodeMulti(target)
+                if retval and decoded_info:
+                    for value in decoded_info:
+                        if value:
+                            return value
+            except cv2.error:
+                pass
 
     return None
 

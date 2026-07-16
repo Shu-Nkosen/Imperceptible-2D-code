@@ -136,7 +136,7 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 
 - `R8/analyze_code/out/r180_e250_f1/`
   - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
-  - `rgb_max_diff_maps/`（各条件内。120フレームから作った差分）
+  - `rgb_max_diff_maps/`（各条件内。120フレームから作った差分。ピクセル等倍の白黒PNG）
   - `qr_decode_all_frames.csv`（全条件のデコード詳細。条件完了ごとに蓄積して上書き）
   - `results.csv`（条件完了ごとに蓄積して上書きされる集約結果）
 
