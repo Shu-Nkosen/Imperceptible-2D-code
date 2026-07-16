@@ -36,8 +36,9 @@ static const char* TOKENS[]   = { "R", "G", "B", "I",   "X"   };
 static const int CHANNEL_COUNT = 5;
 
 static void usage(void) {
-    printf("Usage: present_session.exe --rate <Hz> --exp <250|125|60> --interval <n> --out-manifest <path.json> [--block-sec 6] [--slate-sec 0.5] [--padding-sec 5] [--repeat 1]\\n");
+    printf("Usage: present_session.exe --rate <Hz> --exp <250|125|60> --interval <n> --out-manifest <path.json> [--block-sec 6] [--slate-sec 0.5] [--padding-sec 5] [--qr-sec 3] [--repeat 1]\\n");
     printf("Note: set OS display refresh to target rate before running (esp. 120Hz).\\n");
+    printf("GT QR (HP_QR.png) is shown before cond0, before cond30, and after cond59.\\n");
 }
 
 static int parse_int_arg(int argc, char** argv, const char* key, int default_value) {
@@ -126,6 +127,28 @@ static int calc_frames(double sec, int refresh_hz, int interval) {
     return frames;
 }
 
+static int file_exists(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return 0;
+    fclose(f);
+    return 1;
+}
+
+static const char* resolve_gt_qr_path(void) {
+    static const char* path = "HP_QR.png";
+    if (file_exists(path)) return path;
+    return NULL;
+}
+
+static void draw_texture_frames(GLFWwindow* window, GLuint texture_id, int frames) {
+    for (int f = 0; f < frames && !glfwWindowShouldClose(window); f++) {
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+        draw_texture(texture_id);
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+}
+
 static void write_manifest(
     const char* out_path,
     int rate_hz,
@@ -135,15 +158,14 @@ static void write_manifest(
     double block_sec,
     double slate_sec,
     double padding_sec,
+    double qr_sec,
     int repeat,
+    int cond_count,
     Condition* conds,
-    int cond_count
+    const char* gt_qr_image
 ) {
     if (!out_path || strlen(out_path) == 0) return;
 
-    // Create parent directories if needed.
-    // Example: "manifests\\r180_e250.json"
-    // This is a minimal recursive mkdir implementation for Windows paths.
     {
         char tmp[MAX_PATH];
         strncpy(tmp, out_path, sizeof(tmp) - 1);
@@ -166,6 +188,11 @@ static void write_manifest(
         return;
     }
 
+    // QR insert points: before condition 0, 30, and after last (60)
+    const int qr_before[] = { 0, 30, 60 };
+    const char* qr_names[] = { "start", "mid", "end" };
+    const int qr_count = 3;
+
     fprintf(f, "{\n");
     fprintf(f, "  \"rate_hz\": %d,\n", rate_hz);
     fprintf(f, "  \"exp\": %d,\n", exp);
@@ -174,7 +201,38 @@ static void write_manifest(
     fprintf(f, "  \"block_sec\": %.6f,\n", block_sec);
     fprintf(f, "  \"slate_sec\": %.6f,\n", slate_sec);
     fprintf(f, "  \"padding_sec\": %.6f,\n", padding_sec);
+    fprintf(f, "  \"gt_qr_sec\": %.6f,\n", qr_sec);
+    fprintf(f, "  \"gt_qr_image\": \"%s\",\n", gt_qr_image ? gt_qr_image : "HP_QR.png");
     fprintf(f, "  \"repeat\": %d,\n", repeat);
+
+    // start_sec_from_sync: sync = red onset; then remaining red slate + post padding + content
+    double t = slate_sec + padding_sec;
+    double slot_starts[3] = {0};
+    int slot_i = 0;
+    for (int i = 0; i <= cond_count; i++) {
+        if (slot_i < qr_count && qr_before[slot_i] == i) {
+            slot_starts[slot_i] = t;
+            t += qr_sec;
+            slot_i++;
+        }
+        if (i < cond_count) {
+            t += block_sec;
+        }
+    }
+    fprintf(f, "  \"gt_qr_slots\": [\n");
+    for (int i = 0; i < qr_count; i++) {
+        fprintf(
+            f,
+            "    {\"name\": \"%s\", \"insert_before_cond\": %d, \"start_sec_from_sync\": %.6f, \"duration_sec\": %.6f}%s\n",
+            qr_names[i],
+            qr_before[i],
+            slot_starts[i],
+            qr_sec,
+            (i + 1 == qr_count) ? "" : ","
+        );
+    }
+    fprintf(f, "  ],\n");
+
     fprintf(f, "  \"conditions\": [\n");
     for (int i = 0; i < cond_count; i++) {
         Condition* c = &conds[i];
@@ -225,10 +283,12 @@ int main(int argc, char** argv) {
     double block_sec = parse_double_arg(argc, argv, "--block-sec", 6.0);
     double slate_sec = parse_double_arg(argc, argv, "--slate-sec", 0.5);
     double padding_sec = parse_double_arg(argc, argv, "--padding-sec", 5.0);
+    double qr_sec = parse_double_arg(argc, argv, "--qr-sec", 3.0);
     const char* out_manifest = parse_str_arg(argc, argv, "--out-manifest", "");
 
     if (interval < 1) interval = 1;
     if (repeat < 1) repeat = 1;
+    if (qr_sec < 0.5) qr_sec = 0.5;
 
     timeBeginPeriod(1);
 
@@ -277,11 +337,25 @@ int main(int argc, char** argv) {
         printf("[WARN] expected 60 conditions, got %d\\n", cond_count);
     }
 
-    write_manifest(out_manifest, rate_hz, exp, interval, refresh_hz, block_sec, slate_sec, padding_sec, repeat, conds, cond_count);
+    const char* gt_qr_path = resolve_gt_qr_path();
+    if (!gt_qr_path) {
+        printf("[ERROR] missing GT QR image. Place HP_QR.png in R8/make_movie.\\n");
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        timeEndPeriod(1);
+        return 1;
+    }
+    printf("[INFO] GT QR image: %s\\n", gt_qr_path);
+
+    write_manifest(
+        out_manifest, rate_hz, exp, interval, refresh_hz,
+        block_sec, slate_sec, padding_sec, qr_sec, repeat, cond_count, conds, gt_qr_path
+    );
 
     const int padding_frames = calc_frames(padding_sec, refresh_hz, interval);
     const int slate_frames = calc_frames(slate_sec, refresh_hz, interval);
     const int block_frames = calc_frames(block_sec, refresh_hz, interval);
+    const int qr_frames = calc_frames(qr_sec, refresh_hz, interval);
 
     // Texture cache: load all textures upfront (simple, avoids jitter)
     GLuint normal_tex[128];
@@ -305,10 +379,21 @@ int main(int argc, char** argv) {
         }
     }
 
+    GLuint gt_qr_tex = load_texture(gt_qr_path);
+    if (gt_qr_tex == 0) {
+        printf("[ERROR] failed to load GT QR texture: %s\\n", gt_qr_path);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        timeEndPeriod(1);
+        return 1;
+    }
+
     printf(
-        "[INFO] timeline: pre_padding=%d -> slate_black=%d -> slate_red=%d -> post_padding=%d frames\\n",
-        padding_frames, slate_frames, slate_frames, padding_frames
+        "[INFO] timeline: pre_padding=%d -> slate_black=%d -> slate_red=%d -> post_padding=%d "
+        "-> QR(%d)x3 interleaved with conditions\\n",
+        padding_frames, slate_frames, slate_frames, padding_frames, qr_frames
     );
+    printf("[INFO] gt_qr_sec=%.3f (before cond0, before cond30, after last)\\n", qr_sec);
 
     draw_black_frames(window, padding_frames);
 
@@ -325,13 +410,21 @@ int main(int argc, char** argv) {
 
     printf("[INFO] start conditions: %d blocks, block_frames=%d, repeat=%d\\n", cond_count, block_frames, repeat);
 
+    // QR before first condition
+    printf("[INFO] GT QR slot: start\\n");
+    draw_texture_frames(window, gt_qr_tex, qr_frames);
+
     for (int i = 0; i < cond_count && !glfwWindowShouldClose(window); i++) {
+        if (i == 30) {
+            printf("[INFO] GT QR slot: mid\\n");
+            draw_texture_frames(window, gt_qr_tex, qr_frames);
+        }
+
         GLuint t_normal = normal_tex[i];
         GLuint t_inv = inv_tex[i];
         int flip = 0;
         for (int f = 0; f < block_frames && !glfwWindowShouldClose(window); f++) {
             if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
-            // alternate every 'repeat' frames
             if (repeat == 1) {
                 flip = f & 1;
             } else {
@@ -346,6 +439,13 @@ int main(int argc, char** argv) {
         }
     }
 
+    // QR after last condition
+    if (!glfwWindowShouldClose(window)) {
+        printf("[INFO] GT QR slot: end\\n");
+        draw_texture_frames(window, gt_qr_tex, qr_frames);
+    }
+
+    if (gt_qr_tex) glDeleteTextures(1, &gt_qr_tex);
     for (int i = 0; i < cond_count; i++) {
         if (normal_tex[i]) glDeleteTextures(1, &normal_tex[i]);
         if (inv_tex[i]) glDeleteTextures(1, &inv_tex[i]);

@@ -23,14 +23,18 @@ DEFAULT_MEDIAN_KERNEL = 5
 DEFAULT_MEDIAN_ITERATIONS = 1
 _GT_CACHE: Dict[str, Tuple[Optional[np.ndarray], Optional[Tuple[slice, slice, Tuple[int, int, int, int]]]]] = {}
 FAST_VARIANT_ORDER = (
-    "median_gray",
     "gray",
     "median_otsu",
+)
+# mid もバリアントは fast と同じ（Multi decode の有無だけ違う）
+MID_VARIANT_ORDER = FAST_VARIANT_ORDER
+FULL_VARIANT_ORDER = (
+    "gray",
+    "median_gray",
     "otsu",
+    "median_otsu",
     "otsu_close",
     "median_otsu_close",
-)
-FULL_VARIANT_ORDER = FAST_VARIANT_ORDER + (
     "otsu_inv",
     "median_otsu_inv",
     "adaptive",
@@ -38,9 +42,12 @@ FULL_VARIANT_ORDER = FAST_VARIANT_ORDER + (
 )
 FAST_SCALES = (1.0,)
 FULL_SCALES = (1.0, 2.0, 3.0)
+MID_MEDIAN_KERNELS = (3, 5, 7)
 
 # search mode: fast | mid | full
-# mid = full variants + Multi decode, scale 1.0 only (no enlarge)
+# fast: gray+median_otsu, kernel=5
+# mid:  same variants + Multi + kernels 3/5/7
+# full: all variants + scales + Multi
 
 
 def parse_kernel_list(text: str) -> List[int]:
@@ -413,7 +420,7 @@ def search_mode_params(mode: str) -> Tuple[Tuple[str, ...], Tuple[float, ...], b
     if mode == "full":
         return FULL_VARIANT_ORDER, FULL_SCALES, True
     if mode == "mid":
-        return FULL_VARIANT_ORDER, FAST_SCALES, True
+        return MID_VARIANT_ORDER, FAST_SCALES, True
     return FAST_VARIANT_ORDER, FAST_SCALES, False
 
 
@@ -676,7 +683,7 @@ def main() -> None:
     parser.add_argument(
         "--mid-search",
         action="store_true",
-        help="全バリアント×Multi decode（拡大なし・scale 1.0のみ）。full より速い中間探索",
+        help="gray+median_otsu × Multi × median kernels 3/5/7（拡大なし）",
     )
     parser.add_argument(
         "--full-search",
@@ -706,12 +713,17 @@ def main() -> None:
     if median_kernel % 2 == 0:
         median_kernel += 1
     median_iterations = max(0, args.median_iterations)
-    kernel_candidates = parse_kernel_list(args.median_kernels) if args.median_kernels else [median_kernel]
+    search_mode = resolve_search_mode(args.mid_search, args.full_search)
+    if args.median_kernels:
+        kernel_candidates = parse_kernel_list(args.median_kernels)
+    elif search_mode == "mid":
+        kernel_candidates = list(MID_MEDIAN_KERNELS)
+    else:
+        kernel_candidates = [median_kernel]
     if not kernel_candidates:
         kernel_candidates = [median_kernel]
     workers = max(1, args.workers)
     save_analysis = not args.no_save_analysis
-    search_mode = resolve_search_mode(args.mid_search, args.full_search)
 
     print(
         f"[INFO] mode: {search_mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "

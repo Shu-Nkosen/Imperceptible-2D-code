@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--mid-search",
         action="store_true",
-        help="passed to decode_qr_from_all_frames.py (全バリアント+Multi、拡大なし)",
+        help="passed to decode_qr_from_all_frames.py (gray+median_otsu+Multi+kernels 3/5/7)",
     )
     p.add_argument(
         "--full-search",
@@ -259,6 +260,249 @@ def pick_decode_row_for_folder(rows: List[Dict[str, str]], folder: str) -> Dict[
     return matches[-1]
 
 
+def parse_decode_variant(method: str) -> str:
+    """method タグ (例: median_otsu_x1.0_k5_i1) からバリアント名だけ取り出す。"""
+    text = str(method or "").strip()
+    if not text:
+        return ""
+    match = re.match(r"^(.+)_x[\d.]+_k\d+_i\d+$", text)
+    if match:
+        return match.group(1)
+    # scale 無しの古い形式など
+    match = re.match(r"^(.+)_k\d+_i\d+$", text)
+    if match:
+        return match.group(1)
+    return text
+
+
+def _parse_accuracy(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def pixel_accuracy_for_folder(rows: List[Dict[str, str]], folder: str) -> Tuple[str, str]:
+    """folder 単位の accuracy 平均。GT が無ければ両方空。"""
+    matches = [r for r in rows if r.get("folder") == folder]
+    all_vals: List[float] = []
+    ok_vals: List[float] = []
+    for row in matches:
+        acc = _parse_accuracy(row.get("accuracy"))
+        if acc is None:
+            continue
+        all_vals.append(acc)
+        if str(row.get("success", "")).strip() in ("1", "True", "true"):
+            ok_vals.append(acc)
+    pixel_acc_all = f"{(sum(all_vals) / len(all_vals)):.6f}" if all_vals else ""
+    pixel_acc_ok = f"{(sum(ok_vals) / len(ok_vals)):.6f}" if ok_vals else ""
+    return pixel_acc_all, pixel_acc_ok
+
+
+def format_common_meta(
+    video_name: str,
+    meta: Optional[VideoNameMeta],
+    fps: float,
+) -> Dict[str, str]:
+    """先頭行だけに書く共通メタ（単位・言葉付き）。"""
+    if meta is not None:
+        display_rate = f"{meta.rate_hz} Hz"
+        exposure = f"1/{meta.exp}"
+        fluorescent = "蛍光灯あり" if meta.fluoro == 1 else "蛍光灯なし"
+    else:
+        display_rate = ""
+        exposure = ""
+        fluorescent = ""
+    return {
+        "video": video_name,
+        "display_rate": display_rate,
+        "exposure": exposure,
+        "fluorescent": fluorescent,
+        "camera_fps": f"{fps:.3f} fps",
+    }
+
+
+# results.csv の固定列順（左: 見たい要約 → 共通メタ → 条件 → デコード詳細）
+RESULTS_FIELDNAMES: Tuple[str, ...] = (
+    "folder",
+    "decode_note",
+    "decode_variant",
+    "pixel_acc_all",
+    "pixel_acc_ok",
+    "video",
+    "display_rate",
+    "exposure",
+    "fluorescent",
+    "camera_fps",
+    "cond",
+    "image",
+    "channel",
+    "token",
+    "intensity",
+    "decode_decoded_text",
+    "decode_method",
+    "decode_frame_1",
+    "decode_frame_2",
+    "note",
+    "analysis_frames",
+    "extract_sec",
+)
+
+# GT QR 挿入位置（present_session.c と同じ: before cond 0 / 30 / after last）
+DEFAULT_GT_QR_INSERT_BEFORE: Tuple[int, ...] = (0, 30, 60)
+DEFAULT_GT_QR_SEC = 3.0
+
+
+def build_content_timeline(
+    slate_sec: float,
+    padding_sec: float,
+    block_sec: float,
+    n_conditions: int,
+    qr_sec: float,
+    qr_insert_before: Iterable[int],
+) -> Tuple[List[float], List[Dict[str, Any]]]:
+    """sync(赤 onset) からの秒オフセットで、各条件開始と GT QR スロットを返す。"""
+    inserts = sorted({int(x) for x in qr_insert_before})
+    t = float(slate_sec) + float(padding_sec)
+    cond_starts: List[float] = []
+    slots: List[Dict[str, Any]] = []
+    insert_set = set(inserts)
+
+    for i in range(n_conditions + 1):
+        if i in insert_set and qr_sec > 0:
+            slots.append(
+                {
+                    "name": {0: "start", 30: "mid", 60: "end"}.get(i, f"before_{i}"),
+                    "insert_before_cond": i,
+                    "start_sec_from_sync": t,
+                    "duration_sec": float(qr_sec),
+                }
+            )
+            t += float(qr_sec)
+        if i < n_conditions:
+            cond_starts.append(t)
+            t += float(block_sec)
+    return cond_starts, slots
+
+
+def resolve_gt_qr_timeline(
+    manifest: Dict[str, Any],
+    slate_sec: float,
+    padding_sec: float,
+    block_sec: float,
+    n_conditions: int,
+) -> Tuple[List[float], List[Dict[str, Any]], float]:
+    """manifest に GT QR 定義があれば差し込みタイムライン、無ければ従来（QRなし）。"""
+    slots_m = manifest.get("gt_qr_slots") if isinstance(manifest, dict) else None
+    has_qr = isinstance(slots_m, list) and len(slots_m) > 0
+    if not has_qr and isinstance(manifest, dict) and "gt_qr_sec" in manifest:
+        has_qr = float(manifest.get("gt_qr_sec", 0) or 0) > 0
+
+    if not has_qr:
+        # 旧動画互換: QRなし、条件は post-padding 直後から連続
+        cond_starts, _ = build_content_timeline(
+            slate_sec, padding_sec, block_sec, n_conditions, 0.0, ()
+        )
+        return cond_starts, [], 0.0
+
+    qr_sec = float(manifest.get("gt_qr_sec", DEFAULT_GT_QR_SEC))
+    inserts: List[int] = []
+    if isinstance(slots_m, list):
+        for item in slots_m:
+            try:
+                inserts.append(int(item.get("insert_before_cond")))
+            except Exception:
+                continue
+    if not inserts:
+        inserts = list(DEFAULT_GT_QR_INSERT_BEFORE)
+
+    cond_starts, slots = build_content_timeline(
+        slate_sec, padding_sec, block_sec, n_conditions, qr_sec, inserts
+    )
+    by_before = {
+        int(s.get("insert_before_cond", -1)): s
+        for s in (slots_m or [])
+        if isinstance(s, dict)
+    }
+    for s in slots:
+        m = by_before.get(int(s["insert_before_cond"]))
+        if m and m.get("name"):
+            s["name"] = str(m["name"])
+    return cond_starts, slots, qr_sec
+
+
+def frame_to_gt_mask(frame: np.ndarray, out_size: Tuple[int, int] = (1920, 1080)) -> np.ndarray:
+    """撮影した GT QR 表示を、decode 用の白背景・黒モジュール画像にする。"""
+    if frame is None or frame.size == 0:
+        raise ValueError("empty frame")
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    gray = cv2.resize(gray, out_size, interpolation=cv2.INTER_AREA)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # 背景を白・モジュールを黒に揃える
+    if float(np.mean(binary)) < 127.0:
+        binary = 255 - binary
+    return binary
+
+
+def extract_gt_qr_mask(
+    video_path: Path,
+    sync_frame: int,
+    fps: float,
+    slots: List[Dict[str, Any]],
+    out_path: Path,
+    samples_per_slot: int = 5,
+) -> bool:
+    """manifest の GT QR スロット中央付近からマスクを合成して frame_QR.png を書く。"""
+    if not slots or fps <= 0:
+        return False
+
+    masks: List[np.ndarray] = []
+    for slot in slots:
+        start_sec = float(slot.get("start_sec_from_sync", 0.0))
+        dur_sec = float(slot.get("duration_sec", DEFAULT_GT_QR_SEC))
+        if dur_sec <= 0:
+            continue
+        slot_masks = 0
+        mid0 = start_sec + dur_sec * 0.25
+        mid1 = start_sec + dur_sec * 0.75
+        for k in range(samples_per_slot):
+            frac = k / max(1, samples_per_slot - 1)
+            t = mid0 + (mid1 - mid0) * frac
+            frame_idx = sync_frame + int(round(t * fps))
+            cap = open_capture_at(video_path, frame_idx)
+            try:
+                ok, frame = cap.read()
+            finally:
+                cap.release()
+            if not ok or frame is None:
+                continue
+            try:
+                masks.append(frame_to_gt_mask(frame))
+                slot_masks += 1
+            except Exception:
+                continue
+        print(
+            f"[INFO] GT QR slot={slot.get('name')} "
+            f"start_sec_from_sync={start_sec:.3f} dur={dur_sec:.3f} samples_ok={slot_masks}"
+        )
+
+    if not masks:
+        print("[WARN] GT QR: no frames extracted; pixel_acc will stay empty")
+        return False
+
+    stacked = np.stack(masks, axis=0)
+    # 画素ごとに黒(=0)多数決
+    black_votes = np.sum(stacked < 128, axis=0)
+    merged = np.where(black_votes >= (len(masks) / 2.0), 0, 255).astype(np.uint8)
+    ensure_dir(out_path.parent)
+    cv2.imwrite(str(out_path), merged)
+    print(f"[OK] wrote GT mask: {out_path} (from {len(masks)} samples)")
+    return True
+
+
 def read_manifest(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -278,19 +522,25 @@ def load_decode_csv(path: Path) -> List[Dict[str, str]]:
         return list(reader)
 
 
-def write_results_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+def write_csv(path: Path, rows: Iterable[Dict[str, Any]], fieldnames: Optional[List[str]] = None) -> None:
     rows_list = list(rows)
-    fieldnames: List[str] = []
-    for row in rows_list:
-        for k in row.keys():
-            if k not in fieldnames:
-                fieldnames.append(k)
+    if fieldnames is None:
+        fieldnames = []
+        for row in rows_list:
+            for k in row.keys():
+                if k not in fieldnames:
+                    fieldnames.append(k)
     ensure_dir(path.parent)
     with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         for r in rows_list:
             w.writerow({k: r.get(k, "") for k in fieldnames})
+
+
+def write_results_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+    """条件サマリ results.csv（固定列順）。"""
+    write_csv(path, rows, fieldnames=list(RESULTS_FIELDNAMES))
 
 
 # present_session.c と同じ並び: channel → image → intensity
@@ -378,9 +628,6 @@ def main() -> None:
     sync_frame, fps = detect_black_to_red_sync(video_path, cfg)
     print(f"[OK] SYNC at frame={sync_frame}, fps={fps:.4f}")
 
-    slate_frames = int(round(slate_sec * fps))
-    padding_frames = int(round(padding_sec * fps))
-    block_frames = int(round(block_sec * fps))
     use_start = int(round(float(ns.use_start_sec) * fps))
     use_end = int(round(float(ns.use_end_sec) * fps))
     if use_end <= use_start:
@@ -392,14 +639,30 @@ def main() -> None:
         f"window_frames={use_end - use_start}, analysis_frames={ANALYSIS_FRAME_COUNT} (consecutive)"
     )
 
-    # block 0 starts after red slate + post-padding (sync_frame = red onset)
-    block0 = sync_frame + slate_frames + padding_frames
+    # sync_frame = red onset. Content timeline includes GT QR slots interleaved with conditions.
+    conditions = resolve_conditions(manifest, int(ns.conditions))
+    cond_starts_sec, gt_slots, qr_sec = resolve_gt_qr_timeline(
+        manifest, slate_sec, padding_sec, block_sec, len(conditions)
+    )
     print(
-        f"[INFO] block0={block0} (sync + slate {slate_frames} + padding {padding_frames}), "
+        f"[INFO] timeline from sync: slate+padding={slate_sec + padding_sec:.3f}s, "
+        f"gt_qr_sec={qr_sec:.3f}, slots={len(gt_slots)}, conditions={len(conditions)}"
+    )
+    for s in gt_slots:
+        print(
+            f"[INFO]   QR {s.get('name')}: start_sec_from_sync={s['start_sec_from_sync']:.3f} "
+            f"(before cond {s.get('insert_before_cond')})"
+        )
+
+    gt_path = out_root / "frame_QR.png"
+    extract_gt_qr_mask(video_path, sync_frame, fps, gt_slots, gt_path)
+
+    print(
+        f"[INFO] block0(cond0) ≈ sync + {cond_starts_sec[0]:.3f}s "
+        f"(frame {sync_frame + int(round(cond_starts_sec[0] * fps))}), "
         f"slate_sec={slate_sec}, padding_sec={padding_sec}, block_sec={block_sec}"
     )
 
-    conditions = resolve_conditions(manifest, int(ns.conditions))
     script_dir = Path(__file__).resolve().parent
     diff_script = script_dir / "cal-from-2frame-RGB-oute.py"
     decode_script = script_dir / "decode_qr_from_all_frames.py"
@@ -414,7 +677,7 @@ def main() -> None:
     )
 
     for i, cond in enumerate(conditions):
-        block_start = block0 + i * block_frames
+        block_start = sync_frame + int(round(cond_starts_sec[i] * fps))
         start = block_start + use_start
         end = block_start + use_end
         folder_name = condition_folder_name(cond)
@@ -476,40 +739,59 @@ def main() -> None:
                     new_rows = load_decode_csv(decode_csv)
                     all_decode_rows = [r for r in all_decode_rows if r.get("folder") != folder_name]
                     all_decode_rows.extend(new_rows)
-                    write_results_csv(decode_csv, all_decode_rows)
+                    write_csv(decode_csv, all_decode_rows)
 
         kept = prune_saved_frames(cond_dir, keep_frames=int(ns.max_frames))
-        info = {
-            "cond": i,
+        print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
+
+        dec = pick_decode_row_for_folder(all_decode_rows, folder_name)
+        pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(all_decode_rows, folder_name)
+        method = dec.get("method", "") if dec else ""
+        decode_variant = parse_decode_variant(method) if method else ""
+
+        # decode_note: 成功時は空、失敗時は QR未検出 等（decode_success は出さない）
+        if decode_note:
+            decode_note_out = decode_note
+        elif not dec:
+            decode_note_out = "デコード結果なし"
+        elif str(dec.get("success", "")).strip() in ("1", "True", "true"):
+            decode_note_out = ""
+        else:
+            decode_note_out = str(dec.get("note") or "QR未検出")
+            decode_variant = ""
+
+        row: Dict[str, Any] = {
             "folder": folder_name,
+            "decode_note": decode_note_out,
+            "decode_variant": decode_variant if not decode_note_out else "",
+            "pixel_acc_all": pixel_acc_all,
+            "pixel_acc_ok": pixel_acc_ok,
+            "cond": i,
             "image": cond.get("image", ""),
             "channel": cond.get("channel", ""),
             "token": cond.get("token", ""),
             "intensity": cond.get("intensity", ""),
-            "start_frame": start,
-            "end_frame": start + analyzed,
-            "window_end_frame": end,
+            "decode_decoded_text": dec.get("decoded_text", "") if dec else "",
+            "decode_method": method if not decode_note_out else "",
+            "decode_frame_1": dec.get("frame_1", "") if dec else "",
+            "decode_frame_2": dec.get("frame_2", "") if dec else "",
+            "note": decode_note,
             "analysis_frames": analyzed,
             "extract_sec": f"{extract_sec:.6f}",
-            "saved_frames": kept,
-            "max_frames": int(ns.max_frames),
         }
-        print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
-
-        dec = pick_decode_row_for_folder(all_decode_rows, folder_name)
-
-        row: Dict[str, Any] = {
-            "video": video_path.name,
-            "rate_hz": meta.rate_hz if meta else "",
-            "exp": meta.exp if meta else "",
-            "fluoro": meta.fluoro if meta else "",
-            "fps": f"{fps:.6f}",
-            **info,
-            "note": decode_note,
-        }
-        if dec:
-            for k, v in dec.items():
-                row[f"decode_{k}"] = v
+        # 共通メタは先頭行だけ（単位・言葉付き）
+        if i == 0:
+            row.update(format_common_meta(video_path.name, meta, fps))
+        else:
+            row.update(
+                {
+                    "video": "",
+                    "display_rate": "",
+                    "exposure": "",
+                    "fluorescent": "",
+                    "camera_fps": "",
+                }
+            )
 
         results.append(row)
         write_results_csv(results_csv, results)

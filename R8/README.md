@@ -12,7 +12,7 @@
 
 ## 事前準備（画像生成）
 
-`R8/make_movie` 内で実行します。事前に `ex.png` などのベース画像と `HP_QR.png` が必要です。
+`R8/make_movie` 内で実行します。事前に `ex.png` などのベース画像と **`HP_QR.png`** が必要です。
 
 ```bash
 python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 4,8,12 --channels R,G,B,max,min --clip-margin 12
@@ -59,23 +59,24 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 例（180Hz）:
 
 ```powershell
-.\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r180_e250.json
+.\present_session.exe --rate 180 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --qr-sec 3 --repeat 1 --out-manifest manifests\r180_e250.json
 ```
 
 例（60Hz・180Hzモニタのまま）:
 
 ```powershell
-.\present_session.exe --rate 60 --exp 250 --interval 3 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r60_e250.json
+.\present_session.exe --rate 60 --exp 250 --interval 3 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --qr-sec 3 --repeat 1 --out-manifest manifests\r60_e250.json
 ```
 
 例（120Hz・OSを120Hzにしてから）:
 
 ```powershell
-.\present_session.exe --rate 120 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --repeat 1 --out-manifest manifests\r120_e250.json
+.\present_session.exe --rate 120 --exp 250 --interval 1 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --qr-sec 3 --repeat 1 --out-manifest manifests\r120_e250.json
 ```
 
 - `--interval`: vsyncの間引き（上表参照）
 - `--padding-sec`: 同期信号（黒→赤）の前後に入れる黒余白（秒）。PCの安定待ち用（既定: 5秒）
+- `--qr-sec`: GT用QRの表示秒数（既定: 3）
 - `--repeat`: normal/inv を切り替えるフレーム反復（1なら毎フレーム交互）
 
 表示は以下の順で進みます:
@@ -83,9 +84,15 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 1. **黒 5秒**（余白・ウォームアップ）
 2. **全面黒 → 全面赤**（同期用スレート、各0.5秒）
 3. **黒 5秒**（余白・安定待ち）
-4. **60条件 × 6秒**（各条件は normal/inv の交互表示）
+4. **GT用QR表示 3秒**（`HP_QR.png`・条件0の直前）
+5. **条件 0〜29**（各6秒、normal/inv 交互）
+6. **GT用QR表示 3秒**（中間）
+7. **条件 30〜59**
+8. **GT用QR表示 3秒**（末尾）
 
 撮影した動画は命名規則に従って保存してください（例: `r180_e250_f1.mp4`）。
+
+**注意:** QR差し込み入りの表示に更新したので、`present_session.exe` を再ビルドしてください。GT表示は `R8/make_movie/HP_QR.png` を使います。旧動画（QR区間なし・旧manifest）を解析する場合は、manifest に `gt_qr_slots` が無いと従来の連続タイムラインとして扱います。解析時は QR スロット中央付近から `frame_QR.png` を自動生成し、`pixel_acc_*` に使います。
 
 ## 解析（1コマンド）
 
@@ -119,13 +126,13 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 - 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
 - QR探索モード（`decode_qr_from_all_frames.py` に渡る）:
 
-| フラグ | モード | 二値化バリアント | 拡大 (scale) | Multi decode |
-|---|---|---|---|---|
-| （なし） | **fast**（既定） | 6種 | 1.0 のみ | なし |
-| `--mid-search` | **mid** | 10種（全種） | 1.0 のみ | あり |
-| `--full-search` | **full** | 10種（全種） | 1.0 / 2.0 / 3.0 | あり |
+| フラグ | モード | 二値化バリアント | メディアン kernel | 拡大 | Multi |
+|---|---|---|---|---|---|
+| （なし） | **fast**（既定） | `gray`, `median_otsu` | 5 | なし | なし |
+| `--mid-search` | **mid** | `gray`, `median_otsu` | **3, 5, 7** | なし | あり |
+| `--full-search` | **full** | 10種（全種） | 5（既定） | 1/2/3 | あり |
 
-`--mid-search` は full から拡大だけ省いたモードです。両方指定した場合は `--full-search` が優先されます。
+`--mid-search` は fast と同じ2バリアントに Multi decode とカーネル 3/5/7 を足したモードです。両方指定した場合は `--full-search` が優先されます。`--median-kernels` を明示すると mid の既定 3/5/7 より優先されます。
 既に切り出した条件フォルダだけ再デコードする場合の例:
 
 ```bash
@@ -135,8 +142,25 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 出力先（デフォルト）:
 
 - `R8/analyze_code/out/r180_e250_f1/`
+  - `frame_QR.png`（動画内のGT用QR表示から自動生成した正解マスク）
   - `rice_R_4/` ... `ex_X_12/`（表示順どおり: チャネル→画像→強度）
   - `rgb_max_diff_maps/`（各条件内。120フレームから作った差分。ピクセル等倍の白黒PNG）
   - `qr_decode_all_frames.csv`（全条件のデコード詳細。条件完了ごとに蓄積して上書き）
   - `results.csv`（条件完了ごとに蓄積して上書きされる集約結果）
+
+`results.csv` の列（左が要約）:
+
+| 列 | 内容 |
+|---|---|
+| `folder` | 条件フォルダ名（例: `ex_R_8`） |
+| `decode_note` | 失敗理由。成功時は空（`decode_success` は出さない） |
+| `decode_variant` | 成功時に効いたバリアント名（例: `median_otsu`）。失敗時は空 |
+| `pixel_acc_all` | 全差分ペアの画素 accuracy 平均（GT QR から作った `frame_QR.png` があるとき） |
+| `pixel_acc_ok` | デコード成功ペアだけの accuracy 平均（同上） |
+| `video` / `display_rate` / `exposure` / `fluorescent` / `camera_fps` | 動画共通メタ。**先頭行だけ**埋める（例: `180 Hz`, `1/250`, `蛍光灯あり`, `59.940 fps`） |
+| `cond` … `intensity` | 条件の内訳 |
+| `decode_decoded_text` / `decode_method` / `decode_frame_*` | 成功した代表ペアの詳細 |
+| `note` / `analysis_frames` / `extract_sec` | パイプライン側のメモ・切り出し健全性 |
+
+ペア単位の全詳細は `qr_decode_all_frames.csv` を参照してください。
 
