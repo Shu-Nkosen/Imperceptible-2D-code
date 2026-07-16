@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -24,10 +25,11 @@ DEFAULT_MEDIAN_ITERATIONS = 1
 _GT_CACHE: Dict[str, Tuple[Optional[np.ndarray], Optional[Tuple[slice, slice, Tuple[int, int, int, int]]]]] = {}
 FAST_VARIANT_ORDER = (
     "gray",
+)
+MID_VARIANT_ORDER = (
+    "gray",
     "median_otsu",
 )
-# mid もバリアントは fast と同じ（Multi decode の有無だけ違う）
-MID_VARIANT_ORDER = FAST_VARIANT_ORDER
 FULL_VARIANT_ORDER = (
     "gray",
     "median_gray",
@@ -45,9 +47,9 @@ FULL_SCALES = (1.0, 2.0, 3.0)
 MID_MEDIAN_KERNELS = (3, 5, 7)
 
 # search mode: fast | mid | full
-# fast: gray+median_otsu, kernel=5
-# mid:  same variants + Multi + kernels 3/5/7
-# full: all variants + scales + Multi
+# fast: gray × kernel=5 × 最精度デコード1回（detectAndDecodeMulti）
+# mid:  gray+median_otsu × kernels 3/5/7 × cascade+Multi
+# full: all variants + scales + cascade+Multi
 
 
 def parse_kernel_list(text: str) -> List[int]:
@@ -370,6 +372,22 @@ def trim_white_borders(gray: np.ndarray, white_min: int = 250) -> np.ndarray:
     return gray[y0:y1, x0:x1]
 
 
+def try_decode_multi_once(detector: cv2.QRCodeDetector, image: np.ndarray) -> Optional[str]:
+    """最も精度の高い OpenCV 経路（detectAndDecodeMulti）を1回だけ試す。
+
+    複数QRの同時検出が目的ではなく、単一QRでも Multi 経路の方が読めることが多いため。
+    """
+    try:
+        retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image)
+        if retval and decoded_info:
+            for value in decoded_info:
+                if value:
+                    return value
+    except cv2.error:
+        pass
+    return None
+
+
 def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: bool) -> Optional[str]:
     """OpenCV QR 読取。スマホより弱いので detectAndDecode も常に試す。"""
     candidates = [image]
@@ -395,14 +413,9 @@ def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: boo
             pass
 
         if allow_multi:
-            try:
-                retval, decoded_info, _, _ = detector.detectAndDecodeMulti(target)
-                if retval and decoded_info:
-                    for value in decoded_info:
-                        if value:
-                            return value
-            except cv2.error:
-                pass
+            text = try_decode_multi_once(detector, target)
+            if text:
+                return text
 
     return None
 
@@ -417,12 +430,13 @@ def resolve_search_mode(mid_search: bool, full_search: bool) -> str:
     return "fast"
 
 
-def search_mode_params(mode: str) -> Tuple[Tuple[str, ...], Tuple[float, ...], bool]:
+def search_mode_params(mode: str) -> Tuple[Tuple[str, ...], Tuple[float, ...], str]:
+    """(variants, scales, decode_strategy)。strategy: best_once | cascade."""
     if mode == "full":
-        return FULL_VARIANT_ORDER, FULL_SCALES, True
+        return FULL_VARIANT_ORDER, FULL_SCALES, "cascade"
     if mode == "mid":
-        return MID_VARIANT_ORDER, FAST_SCALES, True
-    return FAST_VARIANT_ORDER, FAST_SCALES, False
+        return MID_VARIANT_ORDER, FAST_SCALES, "cascade"
+    return FAST_VARIANT_ORDER, FAST_SCALES, "best_once"
 
 
 def decode_qr_from_diff(
@@ -439,11 +453,14 @@ def decode_qr_from_diff(
     detector = cv2.QRCodeDetector()
     last_target: Optional[np.ndarray] = None
 
-    variant_order, scales, allow_multi = search_mode_params(search_mode)
+    variant_order, scales, decode_strategy = search_mode_params(search_mode)
 
     for variant_tag, target in iter_variant_targets(gray, median_gray, variant_order, scales):
         last_target = target
-        text = try_decode(detector, target, allow_multi=allow_multi)
+        if decode_strategy == "best_once":
+            text = try_decode_multi_once(detector, target)
+        else:
+            text = try_decode(detector, target, allow_multi=True)
         if text:
             return (
                 text,
@@ -684,18 +701,18 @@ def main() -> None:
     parser.add_argument(
         "--mid-search",
         action="store_true",
-        help="gray+median_otsu × Multi × median kernels 3/5/7（拡大なし）",
+        help="gray+median_otsu × cascade+Multi × median kernels 3/5/7（拡大なし）",
     )
     parser.add_argument(
         "--full-search",
         action="store_true",
-        help="全バリアント×全スケール(1/2/3)×Multi decodeで徹底探索（遅い）",
+        help="全バリアント×全スケール(1/2/3)×cascade+Multiで徹底探索（遅い）",
     )
     parser.add_argument(
         "--workers",
         type=int,
-        default=1,
-        help="並列ワーカー数（1で従来の逐次処理）",
+        default=4,
+        help="並列ワーカー数（既定: 4。実コア数を超えないよう自動上限。1で逐次処理）",
     )
     parser.add_argument(
         "--no-save-analysis",
@@ -733,7 +750,14 @@ def main() -> None:
         kernel_candidates = [median_kernel]
     if not kernel_candidates:
         kernel_candidates = [median_kernel]
-    workers = max(1, args.workers)
+    requested_workers = max(1, args.workers)
+    cpu_count = os.cpu_count() or 1
+    workers = min(requested_workers, cpu_count)
+    if workers < requested_workers:
+        print(
+            f"[INFO] workers capped: requested={requested_workers} -> {workers} "
+            f"(cpu_count={cpu_count})"
+        )
     save_analysis = not args.no_save_analysis
 
     print(

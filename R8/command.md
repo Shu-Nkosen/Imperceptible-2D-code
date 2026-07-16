@@ -194,7 +194,7 @@ cd R8\make_movie
 | 差分パターン | `--diff-mode` | 既定スイープ |
 |---|---|---|
 | 隣接ペア（既定） | `pair` | th = 4, 8, 12 |
-| 窓合算 | `accum` | n = 3,4,5 × th = 12,16,24,32 |
+| 窓合算 | `accum` | n = 3,5 × th = 12,16,24,32 |
 | 統計（時間方向） | `stat` | std: th = 4,8,12 / var: th = 1,2,4 |
 | 時間軸FFT | `fourier` | 第一候補+半分の2周波数 × th = 4,8,12 |
 
@@ -202,9 +202,9 @@ cd R8\make_movie
 
 | 探索パターン | フラグ | 内容 |
 |---|---|---|
-| fast（既定） | （なし） | gray + median_otsu、kernel5、拡大なし |
-| mid | `--mid-search` | 上記 + Multi + kernel 3/5/7 |
-| full | `--full-search` | 全バリアント + 拡大1/2/3 + Multi |
+| fast（既定・検証用） | （なし） | gray × kernel5 × 最精度デコード1回（`detectAndDecodeMulti`） |
+| mid | `--mid-search` | gray + median_otsu、kernel 3/5/7、cascade+Multi |
+| full | `--full-search` | 全バリアント + 拡大1/2/3 + cascade+Multi |
 
 ### 2.3 残すフレーム枚数
 
@@ -266,7 +266,7 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 
 ### 2.5 accum（窓合算）
 
-**パターン:** accum + fast + 既定スイープ（n=3,4,5 × th=12,16,24,32）
+**パターン:** accum + fast + 既定スイープ（n=3,5 × th=12,16,24,32）
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --diff-mode accum
@@ -482,23 +482,28 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 python R8/analyze_code/all_analyze.py
 ```
 
-**既定:** `pair` + `--mid-search` + `--max-frames 120`  
-manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動解決します。
+**既定:** `pair` + **fast**（gray×kernel5×最精度デコード1回）+ `--max-frames 120` + `--workers 4` + **切り出し再利用**  
+manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動解決します。  
+`--workers` は実コア数で上限されます（例: 2コアPCなら自動で2）。  
+同じ動画を別 `--diff-mode` で連続実行すると、120枚切り出し済み条件はスキップされます（`--force-extract` で無効化）。
 
 **例:**
 
 ```bash
-# 端点2枚だけ残して一括
+# 端点2枚だけ残して一括（fast）。再利用ONのため解析フレームは120枚残る
 python R8/analyze_code/all_analyze.py --max-frames 2
 
-# accum で一括
+# accum で一括（直前の切り出しを再利用）
 python R8/analyze_code/all_analyze.py --diff-mode accum
 
-# fourier で一括
-python R8/analyze_code/all_analyze.py --diff-mode fourier --mid-search --max-frames 2
+# fourier で一括（fast）
+python R8/analyze_code/all_analyze.py --diff-mode fourier --max-frames 2
 
-# mid を外して軽く
-python R8/analyze_code/all_analyze.py --no-mid-search --max-frames 1
+# mid に切り替えて検証
+python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
+
+# 切り出しを強制やり直し
+python R8/analyze_code/all_analyze.py --force-extract
 ```
 
 サマリー: `R8/analyze_code/out/all_analyze_summary.csv`

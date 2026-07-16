@@ -45,16 +45,34 @@ def parse_args() -> argparse.Namespace:
         " 1=中間1枚、2=先頭+末尾2枚、120=全部",
     )
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
-    p.add_argument("--workers", type=int, default=1, help="passed to decode_qr_from_all_frames.py")
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="decode_qr_from_all_frames.py に渡す並列数（既定: 4。実コア数を超えないよう上限あり）",
+    )
+    p.add_argument(
+        "--reuse-frames",
+        dest="reuse_frames",
+        action="store_true",
+        default=True,
+        help="条件フォルダに解析用120枚が既にあれば切り出しをスキップ（既定: ON）",
+    )
+    p.add_argument(
+        "--force-extract",
+        dest="reuse_frames",
+        action="store_false",
+        help="既存 frame_*.png を無視して毎回切り出し直す",
+    )
     p.add_argument(
         "--mid-search",
         action="store_true",
-        help="passed to decode_qr_from_all_frames.py (gray+median_otsu+Multi+kernels 3/5/7)",
+        help="passed to decode_qr_from_all_frames.py (gray+median_otsu+cascade+Multi+kernels 3/5/7)",
     )
     p.add_argument(
         "--full-search",
         action="store_true",
-        help="passed to decode_qr_from_all_frames.py (全バリアント+拡大+Multi)",
+        help="passed to decode_qr_from_all_frames.py (全バリアント+拡大+cascade+Multi)",
     )
     p.add_argument(
         "--diff-mode",
@@ -74,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         "--window-ns",
         type=str,
         default="",
-        help="accum 時の窓長スイープ（カンマ区切り）。未指定時: 3,4,5",
+        help="accum 時の窓長スイープ（カンマ区切り）。未指定時: 3,5",
     )
     p.add_argument(
         "--diff-thresholds",
@@ -220,6 +238,22 @@ def clear_frame_pngs(out_dir: Path) -> None:
         return
     for path in out_dir.glob("frame_?????.png"):
         path.unlink(missing_ok=True)
+
+
+def count_consecutive_analysis_frames(out_dir: Path) -> int:
+    """frame_00000.png から連続で存在する解析フレーム枚数。"""
+    if not out_dir.is_dir():
+        return 0
+    count = 0
+    while (out_dir / f"frame_{count:05d}.png").exists():
+        count += 1
+    return count
+
+
+def has_reusable_analysis_frames(
+    out_dir: Path, analysis_frames: int = ANALYSIS_FRAME_COUNT
+) -> bool:
+    return count_consecutive_analysis_frames(out_dir) >= int(analysis_frames)
 
 
 def open_capture_at(video_path: Path, frame_idx: int) -> cv2.VideoCapture:
@@ -526,7 +560,7 @@ DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (12, 16, 24, 32)
 DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
 DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4)
 DIFF_THRESHOLDS_FOURIER: Tuple[int, ...] = (4, 8, 12)
-WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 4, 5)
+WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
 # GT QR 挿入位置（present_session.c と同じ: before cond 0 / 30 / after last）
 DEFAULT_GT_QR_INSERT_BEFORE: Tuple[int, ...] = (0, 30, 60)
 DEFAULT_GT_QR_SEC = 3.0
@@ -831,7 +865,10 @@ def main() -> None:
         )
 
     gt_path = out_root / "frame_QR.png"
-    extract_gt_qr_mask(video_path, sync_frame, fps, gt_slots, gt_path)
+    if ns.reuse_frames and gt_path.exists():
+        print(f"[INFO] reuse GT QR mask: {gt_path.name}")
+    else:
+        extract_gt_qr_mask(video_path, sync_frame, fps, gt_slots, gt_path)
 
     print(
         f"[INFO] block0(cond0) ≈ sync + {cond_starts_sec[0]:.3f}s "
@@ -892,8 +929,12 @@ def main() -> None:
         f"/ target_freqs={([f'{f:.3f}' for f in target_freqs] if target_freqs else '-')} "
         f"/ window_ns={list(window_ns) if window_ns else '-'} "
         f"/ diff_thresholds={list(diff_thresholds)} "
+        f"/ reuse_frames={ns.reuse_frames} "
         "/ results+decode CSV overwritten after each condition (accumulated)"
     )
+
+    reused_conditions = 0
+    extracted_conditions = 0
 
     for i, cond in enumerate(conditions):
         block_start = sync_frame + int(round(cond_starts_sec[i] * fps))
@@ -904,19 +945,29 @@ def main() -> None:
         cond_dir_abs = str(cond_dir.resolve())
         out_root_abs = str(out_root.resolve())
 
-        analyzed = save_block_frames(
-            video_path,
-            start,
-            end,
-            cond_dir,
-            analysis_frames=ANALYSIS_FRAME_COUNT,
-        )
-        extract_sec = (analyzed / fps) if fps > 0 else 0.0
-        print(
-            f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: "
-            f"frames={analyzed} span≈{extract_sec:.3f}s "
-            f"(video [{start}, {start + analyzed}))"
-        )
+        if ns.reuse_frames and has_reusable_analysis_frames(cond_dir, ANALYSIS_FRAME_COUNT):
+            analyzed = count_consecutive_analysis_frames(cond_dir)
+            extract_sec = 0.0
+            reused_conditions += 1
+            print(
+                f"[INFO] ({i+1}/{len(conditions)}) reuse {folder_name}: "
+                f"frames={analyzed} (skip extract)"
+            )
+        else:
+            analyzed = save_block_frames(
+                video_path,
+                start,
+                end,
+                cond_dir,
+                analysis_frames=ANALYSIS_FRAME_COUNT,
+            )
+            extract_sec = (analyzed / fps) if fps > 0 else 0.0
+            extracted_conditions += 1
+            print(
+                f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: "
+                f"frames={analyzed} span≈{extract_sec:.3f}s "
+                f"(video [{start}, {start + analyzed}))"
+            )
         if analyzed < ANALYSIS_FRAME_COUNT:
             print(
                 f"[WARN] {folder_name}: expected {ANALYSIS_FRAME_COUNT} frames, got {analyzed}. "
@@ -1146,7 +1197,16 @@ def main() -> None:
             all_decode_rows.extend(folder_decode_rows)
             write_csv(decode_csv, all_decode_rows)
 
-        kept = prune_saved_frames(cond_dir, keep_frames=int(ns.max_frames))
+        keep_frames = int(ns.max_frames)
+        if ns.reuse_frames and keep_frames < ANALYSIS_FRAME_COUNT:
+            # 次モード（pair→accum 等）で再利用できるよう解析フレームを残す
+            print(
+                f"[INFO] ({i+1}/{len(conditions)}) reuse-frames: "
+                f"keep {ANALYSIS_FRAME_COUNT} frames "
+                f"(--max-frames {keep_frames} の間引きはスキップ)"
+            )
+            keep_frames = ANALYSIS_FRAME_COUNT
+        kept = prune_saved_frames(cond_dir, keep_frames=keep_frames)
         print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
 
         dec = best_dec
@@ -1211,6 +1271,11 @@ def main() -> None:
 
     print(f"[OK] results: {results_csv}")
     print(f"[OK] decode: {decode_csv}")
+    print(
+        f"[INFO] extract summary: reused={reused_conditions} "
+        f"extracted={extracted_conditions} "
+        f"(reuse_frames={ns.reuse_frames})"
+    )
 
 
 if __name__ == "__main__":

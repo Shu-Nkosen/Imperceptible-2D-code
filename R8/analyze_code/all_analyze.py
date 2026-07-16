@@ -49,9 +49,14 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         help="run_pipeline の --out-dir（未指定時は run_pipeline 既定）",
     )
     p.add_argument(
+        "--mid-search",
+        action="store_true",
+        help="run_pipeline に --mid-search を付ける（既定は fast: gray×kernel5×最精度デコード1回）",
+    )
+    p.add_argument(
         "--no-mid-search",
         action="store_true",
-        help="既定の --mid-search を付けない",
+        help="互換用（既定が fast のため何もしない）",
     )
     p.add_argument(
         "pipeline_extra",
@@ -119,14 +124,17 @@ def build_pipeline_args(
     video_path: Path,
     manifest_path: Path,
     out_dir: str,
-    no_mid_search: bool,
+    mid_search: bool,
     pipeline_extra: Sequence[str],
 ) -> List[str]:
     extra = list(pipeline_extra)
     if not any(arg == "--max-frames" or arg.startswith("--max-frames=") for arg in extra):
         extra = ["--max-frames", "120", *extra]
+    if not any(arg == "--workers" or arg.startswith("--workers=") for arg in extra):
+        extra = ["--workers", "4", *extra]
+    # 既定は fast。明示時だけ mid / full を付ける
     if (
-        not no_mid_search
+        mid_search
         and "--mid-search" not in extra
         and "--full-search" not in extra
     ):
@@ -150,11 +158,11 @@ def run_one_video(
     video_path: Path,
     manifest_path: Path,
     out_dir: str,
-    no_mid_search: bool,
+    mid_search: bool,
     pipeline_extra: Sequence[str],
 ) -> RunResult:
     args = build_pipeline_args(
-        video_path, manifest_path, out_dir, no_mid_search, pipeline_extra
+        video_path, manifest_path, out_dir, mid_search, pipeline_extra
     )
     cmd = [sys.executable, str(pipeline_script), *args]
     print(f"[INFO] run: {' '.join(cmd)}")
@@ -258,7 +266,7 @@ def main() -> int:
             video_path,
             manifest_path,
             ns.out_dir,
-            ns.no_mid_search,
+            ns.mid_search,
             pipeline_extra,
         )
         results.append(result)

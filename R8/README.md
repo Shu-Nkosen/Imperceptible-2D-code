@@ -109,7 +109,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 | `--diff-mode` | 内容 | 既定スイープ |
 |---|---|---|
 | `pair`（既定） | 隣接フレームの max-channel 差分 | th = **4 / 8 / 12** |
-| `accum` | 非重複窓 `1..n`, `n+1..2n`, … で abs(max-channel差分) の合算 | n = **3 / 4 / 5** × th = **12 / 16 / 24 / 32** |
+| `accum` | 非重複窓 `1..n`, `n+1..2n`, … で abs(max-channel差分) の合算 | n = **3 / 5** × th = **12 / 16 / 24 / 32** |
 | `stat` | 120フレーム時系列の各ピクセル統計（`std`/`var`）を二値化 | std: th = **4 / 8 / 12**、var: th = **1 / 2 / 4** |
 | `fourier` | 120フレーム時系列の時間軸FFT（max-channel）で特定周波数成分を抽出 | 第一候補+半分の2周波数 × th = **4 / 8 / 12** |
 
@@ -173,9 +173,10 @@ QR探索を mid（拡大なしの中間探索）にする:
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --mid-search
 ```
 
-- `--max-frames`: `120`（既定）/ `2`（先頭+末尾2枚）/ `1`（残すPNG枚数）。差分計算は常に120フレーム分
+- `--max-frames`: `120`（既定）/ `2`（先頭+末尾2枚）/ `1`（残すPNG枚数）。差分計算は常に120フレーム分。`--reuse-frames`（既定）時は次モード再利用のため120枚を残す
+- `--reuse-frames` / `--force-extract`: 既存の条件フォルダ切り出しを再利用（既定）/ 毎回切り出し直す
 - `--diff-mode`: `pair`（既定）/ `accum` / `stat` / `fourier`
-- `--window-ns`: accum 時の窓長（カンマ区切り。未指定時 `3,4,5`）
+- `--window-ns`: accum 時の窓長（カンマ区切り。未指定時 `3,5`）
 - `--stat-kind`: stat 時の統計量（`std` 既定 / `var`）
 - `--target-freqs`: fourier 時のターゲット周波数 Hz（カンマ区切り。未指定時は rate_hz+fps から第一候補+半分を自動）
 - `--fourier-band-radius`: fourier 時の FFT ビン前後幅（既定 `1`）
@@ -183,13 +184,14 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 - 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
 - QR探索モード（`decode_qr_from_all_frames.py` に渡る）:
 
-| フラグ | モード | 二値化バリアント | メディアン kernel | 拡大 | Multi |
+| フラグ | モード | 二値化バリアント | メディアン kernel | 拡大 | デコード |
 |---|---|---|---|---|---|
-| （なし） | **fast**（既定） | `gray`, `median_otsu` | 5 | なし | なし |
-| `--mid-search` | **mid** | `gray`, `median_otsu` | **3, 5, 7** | なし | あり |
-| `--full-search` | **full** | 10種（全種） | 5（既定） | 1/2/3 | あり |
+| （なし） | **fast**（既定） | `gray` | 5 | なし | 最精度経路を1回（`detectAndDecodeMulti`） |
+| `--mid-search` | **mid** | `gray`, `median_otsu` | **3, 5, 7** | なし | cascade + Multi |
+| `--full-search` | **full** | 10種（全種） | 5（既定） | 1/2/3 | cascade + Multi |
 
-`--mid-search` は fast と同じ2バリアントに Multi decode とカーネル 3/5/7 を足したモードです。両方指定した場合は `--full-search` が優先されます。`--median-kernels` を明示すると mid の既定 3/5/7 より優先されます。
+`--mid-search` はバリアント・カーネルを広げて読取を強化するモードです。両方指定した場合は `--full-search` が優先されます。`--median-kernels` を明示すると mid の既定 3/5/7 より優先されます。
+検証・一括解析の既定は **fast**（gray × kernel5 × 最精度デコード1回）です。
 既に切り出した条件フォルダだけ再デコードする場合の例:
 
 ```bash
@@ -238,13 +240,15 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 python R8/analyze_code/all_analyze.py
 ```
 
-既定は `pair` + `--mid-search` + `--max-frames 120`。manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動で探します。追加引数は `run_pipeline.py` にそのまま渡せます。
+既定は `pair` + **fast** + `--max-frames 120` + `--workers 4`。manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動で探します。追加引数は `run_pipeline.py` にそのまま渡せます。`--workers` は実コア数を超えないよう自動上限されます。
+
+切り出しは **再利用が既定**です。同じ動画を `pair` → `accum` → `stat` → `fourier` と回すとき、条件フォルダに `frame_*.png` が120枚あれば再切り出ししません。毎回切り直す場合は `--force-extract` を付けます。再利用中は `--max-frames 1|2` でも解析用120枚は残します（次モードのため）。
 
 ```bash
 python R8/analyze_code/all_analyze.py --max-frames 2
 python R8/analyze_code/all_analyze.py --diff-mode accum
-python R8/analyze_code/all_analyze.py --diff-mode fourier --mid-search --max-frames 2
-python R8/analyze_code/all_analyze.py --no-mid-search --max-frames 1
+python R8/analyze_code/all_analyze.py --diff-mode fourier --max-frames 2
+python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
 ```
 
 サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `manifest`, `status`, `exit_code`, `note`）
