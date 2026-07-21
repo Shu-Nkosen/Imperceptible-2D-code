@@ -422,6 +422,9 @@ def best_accuracy_for_folder(rows: List[Dict[str, str]], folder: str) -> Tuple[s
     return f"{best_acc:.6f}", best_row.get("frame_1", ""), best_row.get("frame_2", "")
 
 
+PAIR_OUTPUT_EACH_END = 20
+
+
 def _parse_frame_index(name: Any) -> int:
     match = re.search(r"frame_(\d+)", str(name or ""))
     return int(match.group(1)) if match else 10**9
@@ -614,7 +617,6 @@ DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
 DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4)
 DIFF_THRESHOLDS_FOURIER: Tuple[int, ...] = (4, 8, 12)
 WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
-PAIR_OUTPUT_EACH_END = 20
 PAIR_ACCURACY_FIELDNAMES: Tuple[str, ...] = (
     "folder",
     "cond",
