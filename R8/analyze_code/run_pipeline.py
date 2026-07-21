@@ -405,6 +405,56 @@ def pixel_accuracy_for_folder(rows: List[Dict[str, str]], folder: str) -> Tuple[
     return pixel_acc_all, pixel_acc_ok
 
 
+def best_accuracy_for_folder(rows: List[Dict[str, str]], folder: str) -> Tuple[str, str, str]:
+    """folder 内で accuracy 最大のペア/窓。(pixel_acc_best, frame_1, frame_2)"""
+    matches = [r for r in rows if r.get("folder") == folder]
+    best_acc: Optional[float] = None
+    best_row: Optional[Dict[str, str]] = None
+    for row in matches:
+        acc = _parse_accuracy(row.get("accuracy"))
+        if acc is None:
+            continue
+        if best_acc is None or acc > best_acc:
+            best_acc = acc
+            best_row = row
+    if best_row is None or best_acc is None:
+        return "", "", ""
+    return f"{best_acc:.6f}", best_row.get("frame_1", ""), best_row.get("frame_2", "")
+
+
+def _parse_frame_index(name: Any) -> int:
+    match = re.search(r"frame_(\d+)", str(name or ""))
+    return int(match.group(1)) if match else 10**9
+
+
+def select_first_last_pair_rows(
+    rows: List[Dict[str, Any]],
+    n_each: int = PAIR_OUTPUT_EACH_END,
+) -> List[Dict[str, Any]]:
+    """先頭 n_each + 末尾 n_each ペアだけ返す（重複は除く）。"""
+    if not rows:
+        return []
+    sorted_rows = sorted(
+        rows,
+        key=lambda r: (
+            _parse_frame_index(r.get("frame_1")),
+            _parse_frame_index(r.get("frame_2")),
+        ),
+    )
+    if len(sorted_rows) <= n_each * 2:
+        return sorted_rows
+    selected = sorted_rows[:n_each] + sorted_rows[-n_each:]
+    seen: set[Tuple[str, str]] = set()
+    out: List[Dict[str, Any]] = []
+    for row in selected:
+        key = (str(row.get("frame_1", "")), str(row.get("frame_2", "")))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
 def _parse_diff_pair_from_name(path: Path) -> Optional[Tuple[int, int]]:
     match = re.match(r"(\d+)-(\d+)-", path.stem)
     if not match:
@@ -535,6 +585,9 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "diff_threshold",
     "pixel_acc_all",
     "pixel_acc_ok",
+    "pixel_acc_best",
+    "best_pair_frame_1",
+    "best_pair_frame_2",
     "video",
     "display_rate",
     "exposure",
@@ -561,6 +614,18 @@ DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
 DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4)
 DIFF_THRESHOLDS_FOURIER: Tuple[int, ...] = (4, 8, 12)
 WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
+PAIR_OUTPUT_EACH_END = 20
+PAIR_ACCURACY_FIELDNAMES: Tuple[str, ...] = (
+    "folder",
+    "cond",
+    "frame_1",
+    "frame_2",
+    "success",
+    "accuracy",
+    "recall",
+    "precision",
+    "diff_threshold",
+)
 # GT QR 挿入位置（present_session.c と同じ: before cond 0 / 30 / after last）
 DEFAULT_GT_QR_INSERT_BEFORE: Tuple[int, ...] = (0, 30, 60)
 DEFAULT_GT_QR_SEC = 3.0
@@ -741,7 +806,7 @@ def write_csv(path: Path, rows: Iterable[Dict[str, Any]], fieldnames: Optional[L
                 if k not in fieldnames:
                     fieldnames.append(k)
     ensure_dir(path.parent)
-    with path.open("w", encoding="utf-8", newline="") as f:
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         for r in rows_list:
@@ -751,6 +816,11 @@ def write_csv(path: Path, rows: Iterable[Dict[str, Any]], fieldnames: Optional[L
 def write_results_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     """条件サマリ results.csv（固定列順）。"""
     write_csv(path, rows, fieldnames=list(RESULTS_FIELDNAMES))
+
+
+def write_pair_accuracy_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+    """採用閾値でのペア別正解率 pair_accuracy.csv。"""
+    write_csv(path, rows, fieldnames=list(PAIR_ACCURACY_FIELDNAMES))
 
 
 # present_session.c と同じ並び: channel → image → intensity
@@ -881,8 +951,10 @@ def main() -> None:
     decode_script = script_dir / "decode_qr_from_all_frames.py"
     results_csv = out_root / "results.csv"
     decode_csv = out_root / "qr_decode_all_frames.csv"
+    pair_accuracy_csv = out_root / "pair_accuracy.csv"
     results: List[Dict[str, Any]] = []
     all_decode_rows: List[Dict[str, str]] = []
+    all_pair_accuracy_rows: List[Dict[str, Any]] = []
 
     diff_mode = str(ns.diff_mode)
     stat_kind = str(ns.stat_kind) if diff_mode == "stat" else ""
@@ -929,6 +1001,7 @@ def main() -> None:
         f"/ target_freqs={([f'{f:.3f}' for f in target_freqs] if target_freqs else '-')} "
         f"/ window_ns={list(window_ns) if window_ns else '-'} "
         f"/ diff_thresholds={list(diff_thresholds)} "
+        f"/ pair_each_end={(PAIR_OUTPUT_EACH_END if diff_mode == 'pair' else '-')} "
         f"/ reuse_frames={ns.reuse_frames} "
         "/ results+decode CSV overwritten after each condition (accumulated)"
     )
@@ -1065,6 +1138,8 @@ def main() -> None:
                         str(th),
                         "--output-subdir",
                         diff_subdir,
+                        "--pair-each-end",
+                        str(PAIR_OUTPUT_EACH_END),
                     ]
 
                 try:
@@ -1090,6 +1165,8 @@ def main() -> None:
                     str(int(ns.workers)),
                     "--no-save-analysis",
                 ]
+                if diff_mode == "pair":
+                    decode_args.extend(["--pair-each-end", str(PAIR_OUTPUT_EACH_END)])
                 if ns.full_search:
                     decode_args.append("--full-search")
                 elif ns.mid_search:
@@ -1211,6 +1288,7 @@ def main() -> None:
 
         dec = best_dec
         pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(best_rows, folder_name)
+        pixel_acc_best, best_pair_f1, best_pair_f2 = best_accuracy_for_folder(best_rows, folder_name)
         method = dec.get("method", "") if dec else ""
         decode_variant = parse_decode_variant(method) if method else ""
 
@@ -1235,6 +1313,9 @@ def main() -> None:
             "diff_threshold": "" if best_th is None else str(best_th),
             "pixel_acc_all": pixel_acc_all,
             "pixel_acc_ok": pixel_acc_ok,
+            "pixel_acc_best": pixel_acc_best,
+            "best_pair_frame_1": best_pair_f1,
+            "best_pair_frame_2": best_pair_f2,
             "cond": i,
             "image": cond.get("image", ""),
             "channel": cond.get("channel", ""),
@@ -1263,14 +1344,38 @@ def main() -> None:
             )
 
         results.append(row)
+
+        if diff_mode == "pair" and best_rows:
+            all_pair_accuracy_rows = [
+                r for r in all_pair_accuracy_rows if r.get("folder") != folder_name
+            ]
+            for pr in select_first_last_pair_rows(best_rows):
+                all_pair_accuracy_rows.append(
+                    {
+                        "folder": folder_name,
+                        "cond": i,
+                        "frame_1": pr.get("frame_1", ""),
+                        "frame_2": pr.get("frame_2", ""),
+                        "success": pr.get("success", ""),
+                        "accuracy": pr.get("accuracy", ""),
+                        "recall": pr.get("recall", ""),
+                        "precision": pr.get("precision", ""),
+                        "diff_threshold": pr.get("diff_threshold", ""),
+                    }
+                )
+            write_pair_accuracy_csv(pair_accuracy_csv, all_pair_accuracy_rows)
+
         write_results_csv(results_csv, results)
+        pair_note = f", {pair_accuracy_csv.name} ({len(all_pair_accuracy_rows)} rows)" if diff_mode == "pair" else ""
         print(
             f"[OK] ({i+1}/{len(conditions)}) wrote {results_csv.name} ({len(results)} rows), "
-            f"{decode_csv.name} ({len(all_decode_rows)} decode rows)"
+            f"{decode_csv.name} ({len(all_decode_rows)} decode rows){pair_note}"
         )
 
     print(f"[OK] results: {results_csv}")
     print(f"[OK] decode: {decode_csv}")
+    if diff_mode == "pair":
+        print(f"[OK] pair accuracy: {pair_accuracy_csv}")
     print(
         f"[INFO] extract summary: reused={reused_conditions} "
         f"extracted={extracted_conditions} "

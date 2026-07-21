@@ -114,7 +114,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 | `fourier` | 120フレーム時系列の時間軸FFT（max-channel）で特定周波数成分を抽出 | 第一候補+半分の2周波数 × th = **4 / 8 / 12** |
 
 デコード成功したもののうち `pixel_acc_ok` が最大の組み合わせを `results.csv` に採用します（同点なら小さい th、さらに同点なら小さい n）。
-`pair` は重くなりやすいので、**decode判定は全ペアで実施したまま**、保存する差分PNGだけを **成功ペア + 最高accuracyペア + 10枚に1枚** に間引きます。全件詳細は `qr_decode_all_frames.csv` に残ります。
+`pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします（`--pair-each-end 20`）。保存する差分PNGはさらに **成功ペア + 最高accuracyペア + 10枚に1枚** に間引きます。
 `--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
 
 解析後に120枚残す（既定・pair・QR探索は fast）:
@@ -224,32 +224,179 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | `diff_threshold` | 採用した差分閾値。毎回総当たりして選ぶ |
 | `pixel_acc_all` | 全差分ペア／窓の画素 accuracy 平均（GT QR から作った `frame_QR.png` があるとき） |
 | `pixel_acc_ok` | デコード成功したものだけの accuracy 平均（同上） |
+| `pixel_acc_best` | 全ペア／窓のうち最大 accuracy |
+| `best_pair_frame_1` / `best_pair_frame_2` | 最高 accuracy のペア／窓端点 |
 | `video` / `display_rate` / `exposure` / `fluorescent` / `camera_fps` | 動画共通メタ。**先頭行だけ**埋める（例: `180 Hz`, `1/250`, `蛍光灯あり`, `59.940 fps`） |
 | `cond` … `intensity` | 条件の内訳 |
 | `decode_decoded_text` / `decode_method` / `decode_frame_*` | 成功した代表の詳細（accum 時 `frame_*` は窓の端点） |
 | `note` / `analysis_frames` / `extract_sec` | パイプライン側のメモ・切り出し健全性 |
 
 ペア／窓単位の全詳細は `qr_decode_all_frames.csv` を参照してください。
-特に `pair` は、PNG保存は間引かれていても **CSV には全ペアの判定結果**が入ります。
+**pair モード**では先頭20＋末尾20ペアだけ解析し、同じ範囲を `pair_accuracy.csv` にも出します。
+
+---
+
+## CSV出力の読み方
+
+### 文字化けについて
+
+CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
+
+| 開き方 | 日本語 |
+|--------|--------|
+| **Excel（Windows）** | ダブルクリックでだいたいOK（BOM付きのため） |
+| **Excel** で文字化けする場合 | 「データ」→「テキスト/CSV」→ ファイルの元の形式 **65001: Unicode (UTF-8)** |
+| **Python / pandas** | `pd.read_csv(path, encoding="utf-8-sig")` |
+| **メモ帳 / VS Code** | そのまま読める |
+
+日本語が入る主な列: `decode_note`, `fluorescent`, `note`, `gt_note`（例: `蛍光灯あり`, `QR未検出`）。
+
+### ファイル一覧
+
+| ファイル | 場所 | 1行の意味 |
+|----------|------|-----------|
+| `results.csv` | `out/<動画stem>/` | **条件1個**の要約（60行） |
+| `results_<pass>.csv` | 同上 | `all_analyze` 実行時の手法別アーカイブ（例: `results_pair.csv`） |
+| `pair_accuracy.csv` | 同上 | **pair モード**で採用閾値のペア正解率（**先頭20＋末尾20** / 条件） |
+| `qr_decode_all_frames.csv` | 同上 | **差分1枚（ペア/窓）** ごとのデコード詳細（全閾値スイープ含む） |
+| `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別アーカイブ |
+| `all_analyze_summary.csv` | `out/` | **動画×手法** ごとの成否サマリー |
+
+1回の `run_pipeline` は **1つの `diff_mode` のみ**。モード比較は `results_pair.csv` と `results_fourier.csv` などを並べて見ます。
+
+---
+
+### `results.csv`（条件要約・60行/動画）
+
+左から重要な列順です。
+
+| 列 | 説明 |
+|----|------|
+| `folder` | 条件フォルダ名（例: `rice_R_4`, `ex_X_12`） |
+| `decode_note` | **空 = QRデコード成功**。失敗時は理由（例: `QR未検出`, `extract失敗: 0 frames`） |
+| `decode_variant` | 成功時に効いた二値化バリアント（fast では `gray` など）。失敗時は空 |
+| `diff_mode` | 今回の解析手法: `pair` / `accum` / `stat` / `fourier` |
+| `window_n` | accum で**採用した**窓長（例: `3`, `5`）。他モードは空 |
+| `stat_kind` | stat で**採用した**統計量: `std` / `var`。他モードは空 |
+| `fft_target_hz` | fourier で**採用した**ターゲット周波数（Hz）。他モードは空 |
+| `diff_threshold` | **採用した**差分二値化閾値（0–255 スケール、例: `8`） |
+| `pixel_acc_all` | その条件の全ペア/窓について、GT QR（`frame_QR.png`）との画素一致率の**平均**（0〜1）。GT 無しは空 |
+| `pixel_acc_ok` | 上記のうち **デコード成功したものだけ** の平均。採用スコアの目安 |
+| `pixel_acc_best` | 全ペア/窓のうち **最大** の画素一致率（0〜1）。GT 無しは空 |
+| `best_pair_frame_1` | `pixel_acc_best` を出したペア/窓の左端フレーム |
+| `best_pair_frame_2` | 同上・右端フレーム |
+| `video` | 動画ファイル名。**先頭行（cond 0）だけ**埋まる |
+| `display_rate` | 表示レート（例: `180 Hz`）。先頭行のみ |
+| `exposure` | 露光（例: `1/250`）。先頭行のみ |
+| `fluorescent` | `蛍光灯あり` / `蛍光灯なし`。先頭行のみ |
+| `camera_fps` | 動画から検出した fps（例: `59.940 fps`）。先頭行のみ |
+| `cond` | 条件番号 0〜59 |
+| `image` | 画像名（`rice`, `ex` など） |
+| `channel` | チャネル（`R`, `G`, `B`, `X`=max, `I`=min） |
+| `token` | 内部トークン（CSV上の `channel` と対応） |
+| `intensity` | 強度 4 / 8 / 12 |
+| `decode_decoded_text` | 読み取れた QR 文字列。失敗時は空 |
+| `decode_method` | 成功時の OpenCV 経路タグ（例: `gray_k5_i1`） |
+| `decode_frame_1` | デコード成功した**最初の**ペア/窓の左端（代表行） |
+| `decode_frame_2` | 同上・右端（`best_pair_*` とは別。最高正解率ペアは `best_pair_frame_*`） |
+| `note` | パイプライン内部メモ（通常は空） |
+| `analysis_frames` | 切り出して解析に使ったフレーム数（通常 120） |
+| `extract_sec` | 切り出し区間の秒数（再利用時は 0） |
+
+**採用ルール:** 各条件で閾値（＋ accum なら窓長、fourier なら周波数）を総当たりし、**デコード成功のうち `pixel_acc_ok` 最大**の組み合わせを1行に載せます。
+
+---
+
+### `qr_decode_all_frames.csv`（全ペア/窓の詳細）
+
+| 列 | 説明 |
+|----|------|
+| `folder` | 条件フォルダ名 |
+| `frame_1` | ペア左 / 窓始端のフレーム名 |
+| `frame_2` | ペア右 / 窓終端のフレーム名 |
+| `diff_image` | 使った差分 PNG の相対パス |
+| `analysis_image` | デコード成功時の中間画像（保存設定による） |
+| `decoded_text` | 読み取り文字列。失敗時は空 |
+| `success` | `1` = 成功, `0` = 失敗 |
+| `method` | 二値化＋デコード手法タグ |
+| `note` | 失敗理由（成功時は空） |
+| `recall` | GT QR との再現率（0〜1）。GT 無しは空 |
+| `precision` | GT QR との精度（0〜1） |
+| `accuracy` | GT QR との画素一致率（0〜1） |
+| `noise` | ノイズ指標（GT 比較時） |
+| `gt_note` | GT 画像が無い等のメモ |
+| `diff_mode` | `run_pipeline` 実行時に付く（`pair` 等） |
+| `window_n` | 試した accum 窓長 |
+| `stat_kind` | 試した stat 種別 |
+| `fft_target_hz` | 試した fourier 周波数 |
+| `diff_threshold` | 試した閾値 |
+
+`pair` では1条件あたり最大 **40行×閾値数**（先頭20＋末尾20ペア）。`stat` / `fourier` は閾値スイープ分のみ。
+
+**正解率:** GT がある場合、QR デコード失敗でも差分画像（最後に試した二値化 or 生 gray）と GT を比較して `accuracy` を出します。
+
+---
+
+### `pair_accuracy.csv`（pair・採用閾値のペア別正解率）
+
+`diff_mode=pair` のときだけ出力。**先頭20ペア＋末尾20ペア**（最大40行/条件。119未満なら全件）だけ載せます。
+
+| 列 | 説明 |
+|----|------|
+| `folder` | 条件フォルダ名 |
+| `cond` | 条件番号 0〜59 |
+| `frame_1` | ペア左フレーム |
+| `frame_2` | ペア右フレーム |
+| `success` | QR デコード成功 `1` / 失敗 `0` |
+| `accuracy` | GT との画素一致率（0〜1） |
+| `recall` | GT との再現率 |
+| `precision` | GT との精度 |
+| `diff_threshold` | 採用した閾値 |
+
+1条件あたり最大 **40行**（先頭20＋末尾20）。`pixel_acc_*` もこの40ペアから計算します。
+
+---
+
+### `all_analyze_summary.csv`（一括実行サマリー）
+
+| 列 | 説明 |
+|----|------|
+| `video` | 動画ファイル名（例: `r180_e250_f1.mp4`） |
+| `pass` | 解析手法: `pair`, `accum`, `stat_std`, `stat_var`, `fourier` |
+| `manifest` | 使った manifest のパス |
+| `status` | `OK` / `FAIL` |
+| `exit_code` | `run_pipeline` の終了コード（0 = 成功） |
+| `note` | 失敗理由（manifest 不在、`run_pipeline exit=1` 等） |
+
+---
 
 ## 一括解析（全動画）
 
-`R8/movie` 内の命名規則に合う `*.mp4` を順番に `run_pipeline.py` で解析します。1本失敗しても他は続行します。
+`R8/movie` 内の命名規則に合う `*.mp4` を順番に解析します。1本失敗しても他は続行します。
 
 ```bash
 python R8/analyze_code/all_analyze.py
 ```
 
-既定は `pair` + **fast** + `--max-frames 120` + `--workers 4`。manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動で探します。追加引数は `run_pipeline.py` にそのまま渡せます。`--workers` は実コア数を超えないよう自動上限されます。
+**既定:** 各動画について **全解析手法** を次の順で実行します。
 
-切り出しは **再利用が既定**です。同じ動画を `pair` → `accum` → `stat` → `fourier` と回すとき、条件フォルダに `frame_*.png` が120枚あれば再切り出ししません。毎回切り直す場合は `--force-extract` を付けます。再利用中は `--max-frames 1|2` でも解析用120枚は残します（次モードのため）。
+1. `pair`
+2. `accum`
+3. `stat`（std）
+4. `stat`（var）
+5. `fourier`
+
+共通設定は **fast** + `--max-frames 120` + `--workers 4` + **切り出し再利用**。  
+手法ごとの結果は `results_<pass>.csv` / `qr_decode_all_frames_<pass>.csv` として残ります（例: `results_pair.csv`）。  
+`--diff-mode accum` など手法を明示した場合は、その手法だけ実行します。
 
 ```bash
 python R8/analyze_code/all_analyze.py --max-frames 2
 python R8/analyze_code/all_analyze.py --diff-mode accum
 python R8/analyze_code/all_analyze.py --diff-mode fourier --max-frames 2
 python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
+python R8/analyze_code/all_analyze.py --force-extract
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `manifest`, `status`, `exit_code`, `note`）
+サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）
 

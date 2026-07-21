@@ -237,7 +237,7 @@ def empty_gt_metrics() -> Dict[str, str]:
     }
 
 
-def collect_all_diff_paths(folder_dir: Path) -> Tuple[List[Path], str]:
+def collect_all_diff_paths(folder_dir: Path, pair_each_end: int = 0) -> Tuple[List[Path], str]:
     diff_dir = folder_dir / DIFF_SUBDIR
     if not diff_dir.exists():
         return [], f"差分ディレクトリなし: {DIFF_SUBDIR}"
@@ -253,7 +253,24 @@ def collect_all_diff_paths(folder_dir: Path) -> Tuple[List[Path], str]:
         left, right = pair
         return (0, left, right, path.name)
 
-    return sorted(paths, key=sort_key), ""
+    paths = sorted(paths, key=sort_key)
+    total = len(paths)
+    if pair_each_end > 0 and total > pair_each_end * 2:
+        selected = paths[:pair_each_end] + paths[-pair_each_end:]
+        seen: set[str] = set()
+        limited: List[Path] = []
+        for path in selected:
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            limited.append(path)
+        paths = limited
+        print(
+            f"[INFO] {folder_dir.name}: pair limit first/last {pair_each_end} each "
+            f"-> {len(paths)}/{total} diffs"
+        )
+    return paths, ""
 
 
 def apply_median_filter(gray: np.ndarray, kernel_size: int, iterations: int) -> np.ndarray:
@@ -529,6 +546,8 @@ def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
     search_mode = str(task.get("search_mode") or "fast")
     gt_path_str = str(task.get("gt_path") or "")
 
+    gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
+
     decoded_text, method, used_img = decode_qr_with_kernel_candidates(
         diff_path,
         kernel_candidates,
@@ -543,7 +562,8 @@ def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
         if ok_encode:
             used_img_bytes = encoded.tobytes()
 
-    recall, precision, accuracy, noise, gt_note = compare_with_gt(used_img, gt_path_str)
+    img_for_gt = used_img if used_img is not None else gray
+    recall, precision, accuracy, noise, gt_note = compare_with_gt(img_for_gt, gt_path_str)
 
     return {
         "folder": str(task["folder"]),
@@ -571,12 +591,13 @@ def build_tasks(
     kernel_candidates: List[int],
     median_iterations: int,
     search_mode: str,
+    pair_each_end: int = 0,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
     tasks: List[Dict[str, object]] = []
     pre_rows: List[Dict[str, object]] = []
 
     for folder_dir in target_folders:
-        diff_paths, note = collect_all_diff_paths(folder_dir)
+        diff_paths, note = collect_all_diff_paths(folder_dir, pair_each_end=pair_each_end)
         gt_path_str = ""
         gt_note = ""
         try:
@@ -731,6 +752,12 @@ def main() -> None:
         default="",
         help="差分サブディレクトリ名（未指定時: rgb_max_diff_maps）",
     )
+    parser.add_argument(
+        "--pair-each-end",
+        type=int,
+        default=0,
+        help="pair 時: 先頭/末尾それぞれ N ペアだけデコード（0=全ペア）",
+    )
     args = parser.parse_args()
 
     global DIFF_SUBDIR
@@ -795,6 +822,7 @@ def main() -> None:
         kernel_candidates,
         median_iterations,
         search_mode,
+        pair_each_end=max(0, int(args.pair_each_end)),
     )
 
     total = len(tasks)
@@ -829,7 +857,7 @@ def main() -> None:
                 elif done % 50 == 0 or done == total:
                     print(f"[INFO] progress: {done}/{total}")
 
-    with output_csv.open("w", encoding="utf-8", newline="") as f:
+    with output_csv.open("w", encoding="utf-8-sig", newline="") as f:
         fieldnames = [
             "folder",
             "frame_1",

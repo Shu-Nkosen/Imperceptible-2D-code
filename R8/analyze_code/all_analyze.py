@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,12 +15,22 @@ ALLOWED_RATES = {45, 60, 90, 120, 180}
 ALLOWED_EXPS = {250, 125, 60}
 ALLOWED_FLUORO = {0, 1}
 
-SUMMARY_FIELDS = ("video", "manifest", "status", "exit_code", "note")
+# 既定では全手法をこの順で実行（動画ごと → 切り出し再利用が効く）
+ALL_ANALYSIS_PASSES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("pair", ("--diff-mode", "pair")),
+    ("accum", ("--diff-mode", "accum")),
+    ("stat_std", ("--diff-mode", "stat", "--stat-kind", "std")),
+    ("stat_var", ("--diff-mode", "stat", "--stat-kind", "var")),
+    ("fourier", ("--diff-mode", "fourier")),
+)
+
+SUMMARY_FIELDS = ("video", "pass", "manifest", "status", "exit_code", "note")
 
 
 @dataclass(frozen=True)
 class RunResult:
     video: Path
+    pass_label: str
     manifest: str
     status: str
     exit_code: int
@@ -28,7 +39,10 @@ class RunResult:
 
 def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     p = argparse.ArgumentParser(
-        description="R8/movie 内の命名規則に合う動画を順番に run_pipeline.py で解析する"
+        description=(
+            "R8/movie 内の命名規則に合う動画を順番に解析する。"
+            "既定では pair / accum / stat(std) / stat(var) / fourier を全部実行する。"
+        )
     )
     p.add_argument(
         "--movie-dir",
@@ -61,7 +75,10 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     p.add_argument(
         "pipeline_extra",
         nargs=argparse.REMAINDER,
-        help="run_pipeline.py にそのまま渡す追加引数（例: --diff-mode accum）",
+        help=(
+            "run_pipeline.py にそのまま渡す追加引数。"
+            "例: --max-frames 2 / --diff-mode accum（指定時はその手法のみ）"
+        ),
     )
     ns = p.parse_args()
     extra = list(ns.pipeline_extra)
@@ -120,19 +137,83 @@ def resolve_manifest(video_path: Path, manifest_dir: Path) -> Optional[Path]:
     return manifest_path if manifest_path.exists() else None
 
 
+def resolve_out_root(video_path: Path, out_dir: str, default_out: Path) -> Path:
+    """run_pipeline.py と同じ出力ルート: <out-dir>/<video_stem>/"""
+    base = Path(out_dir).resolve() if out_dir.strip() else default_out.resolve()
+    meta = parse_video_name(video_path)
+    stem = meta.stem if meta is not None else video_path.stem
+    return base / stem
+
+
+def has_cli_flag(args: Sequence[str], flag: str) -> bool:
+    prefix = f"{flag}="
+    return any(arg == flag or arg.startswith(prefix) for arg in args)
+
+
+def strip_mode_args(args: Sequence[str]) -> List[str]:
+    """--diff-mode / --stat-kind とその値を除去する。"""
+    out: List[str] = []
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--diff-mode", "--stat-kind"):
+            skip_next = True
+            continue
+        if arg.startswith("--diff-mode=") or arg.startswith("--stat-kind="):
+            continue
+        out.append(arg)
+    return out
+
+
+def resolve_analysis_passes(
+    pipeline_extra: Sequence[str],
+) -> Tuple[List[Tuple[str, Tuple[str, ...]]], List[str]]:
+    """戻り値: (passes, shared_extra)。
+
+    --diff-mode が明示されていればその手法だけ。未指定なら全手法。
+    """
+    shared = list(pipeline_extra)
+    if has_cli_flag(shared, "--diff-mode"):
+        # ユーザー指定の1手法のみ（shared に diff-mode を残す）
+        label = "custom"
+        for i, arg in enumerate(shared):
+            if arg == "--diff-mode" and i + 1 < len(shared):
+                mode = shared[i + 1]
+                kind = ""
+                for j, a in enumerate(shared):
+                    if a == "--stat-kind" and j + 1 < len(shared):
+                        kind = shared[j + 1]
+                        break
+                    if a.startswith("--stat-kind="):
+                        kind = a.split("=", 1)[1]
+                        break
+                label = f"{mode}_{kind}" if mode == "stat" and kind else mode
+                break
+            if arg.startswith("--diff-mode="):
+                mode = arg.split("=", 1)[1]
+                label = mode
+                break
+        return [(label, ())], shared
+
+    shared = strip_mode_args(shared)
+    return list(ALL_ANALYSIS_PASSES), shared
+
+
 def build_pipeline_args(
     video_path: Path,
     manifest_path: Path,
     out_dir: str,
     mid_search: bool,
-    pipeline_extra: Sequence[str],
+    shared_extra: Sequence[str],
+    pass_args: Sequence[str],
 ) -> List[str]:
-    extra = list(pipeline_extra)
-    if not any(arg == "--max-frames" or arg.startswith("--max-frames=") for arg in extra):
+    extra = list(shared_extra)
+    if not has_cli_flag(extra, "--max-frames"):
         extra = ["--max-frames", "120", *extra]
-    if not any(arg == "--workers" or arg.startswith("--workers=") for arg in extra):
+    if not has_cli_flag(extra, "--workers"):
         extra = ["--workers", "4", *extra]
-    # 既定は fast。明示時だけ mid / full を付ける
     if (
         mid_search
         and "--mid-search" not in extra
@@ -145,6 +226,7 @@ def build_pipeline_args(
         str(video_path.resolve()),
         "--manifest",
         str(manifest_path.resolve()),
+        *pass_args,
         *extra,
     ]
     if out_dir.strip():
@@ -152,26 +234,44 @@ def build_pipeline_args(
     return args
 
 
-def run_one_video(
+def archive_pass_outputs(out_root: Path, pass_label: str) -> None:
+    """results.csv / qr_decode_all_frames.csv / pair_accuracy.csv を手法別ファイル名で残す。"""
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in pass_label)
+    for name in ("results.csv", "qr_decode_all_frames.csv", "pair_accuracy.csv"):
+        src = out_root / name
+        if not src.exists():
+            continue
+        dst = out_root / f"{src.stem}_{safe}{src.suffix}"
+        shutil.copy2(src, dst)
+        print(f"[INFO] archived {src.name} -> {dst.name}")
+
+
+def run_one_pass(
     pipeline_script: Path,
     cwd: Path,
     video_path: Path,
     manifest_path: Path,
     out_dir: str,
+    default_out: Path,
     mid_search: bool,
-    pipeline_extra: Sequence[str],
+    shared_extra: Sequence[str],
+    pass_label: str,
+    pass_args: Sequence[str],
 ) -> RunResult:
     args = build_pipeline_args(
-        video_path, manifest_path, out_dir, mid_search, pipeline_extra
+        video_path, manifest_path, out_dir, mid_search, shared_extra, pass_args
     )
     cmd = [sys.executable, str(pipeline_script), *args]
-    print(f"[INFO] run: {' '.join(cmd)}")
+    print(f"[INFO] run [{pass_label}]: {' '.join(cmd)}")
     try:
         completed = subprocess.run(cmd, cwd=str(cwd), check=False)
         exit_code = int(completed.returncode)
+        out_root = resolve_out_root(video_path, out_dir, default_out)
+        archive_pass_outputs(out_root, pass_label)
         if exit_code == 0:
             return RunResult(
                 video=video_path,
+                pass_label=pass_label,
                 manifest=str(manifest_path),
                 status="OK",
                 exit_code=exit_code,
@@ -179,6 +279,7 @@ def run_one_video(
             )
         return RunResult(
             video=video_path,
+            pass_label=pass_label,
             manifest=str(manifest_path),
             status="FAIL",
             exit_code=exit_code,
@@ -187,6 +288,7 @@ def run_one_video(
     except Exception as exc:
         return RunResult(
             video=video_path,
+            pass_label=pass_label,
             manifest=str(manifest_path),
             status="FAIL",
             exit_code=-1,
@@ -203,6 +305,7 @@ def write_summary(path: Path, results: List[RunResult]) -> None:
             writer.writerow(
                 {
                     "video": result.video.name,
+                    "pass": result.pass_label,
                     "manifest": result.manifest,
                     "status": result.status,
                     "exit_code": str(result.exit_code),
@@ -223,10 +326,12 @@ def main() -> int:
     pipeline_script = Path(__file__).resolve().parent / "run_pipeline.py"
     cwd = Path(__file__).resolve().parent
 
+    passes, shared_extra = resolve_analysis_passes(pipeline_extra)
     videos, rejected = discover_videos(movie_dir)
     print(f"[INFO] movie_dir={movie_dir}")
     print(f"[INFO] manifest_dir={manifest_dir}")
     print(f"[INFO] target_videos={len(videos)} rejected_by_name={len(rejected)}")
+    print(f"[INFO] analysis_passes={[label for label, _ in passes]}")
     if rejected:
         print("[WARN] skipped (invalid name):")
         for path in rejected:
@@ -237,8 +342,10 @@ def main() -> int:
         return 1
 
     results: List[RunResult] = []
-    for i, video_path in enumerate(videos, 1):
-        print(f"[INFO] ({i}/{len(videos)}) {video_path.name}")
+    total_jobs = len(videos) * len(passes)
+    job_i = 0
+    for vi, video_path in enumerate(videos, 1):
+        print(f"[INFO] ({vi}/{len(videos)}) {video_path.name}")
         manifest_path = resolve_manifest(video_path, manifest_dir)
         if manifest_path is None:
             meta = parse_video_name(video_path)
@@ -249,31 +356,41 @@ def main() -> int:
             )
             note = f"manifest not found: {manifest_dir / expected}"
             print(f"[WARN] {note}")
-            results.append(
-                RunResult(
-                    video=video_path,
-                    manifest="",
-                    status="FAIL",
-                    exit_code=-1,
-                    note=note,
+            for pass_label, _ in passes:
+                results.append(
+                    RunResult(
+                        video=video_path,
+                        pass_label=pass_label,
+                        manifest="",
+                        status="FAIL",
+                        exit_code=-1,
+                        note=note,
+                    )
                 )
-            )
             continue
 
-        result = run_one_video(
-            pipeline_script,
-            cwd,
-            video_path,
-            manifest_path,
-            ns.out_dir,
-            ns.mid_search,
-            pipeline_extra,
-        )
-        results.append(result)
-        if result.status == "OK":
-            print(f"[OK] {video_path.name}")
-        else:
-            print(f"[WARN] {video_path.name}: {result.note}")
+        for pass_label, pass_args in passes:
+            job_i += 1
+            print(
+                f"[INFO] ({job_i}/{total_jobs}) {video_path.name} / {pass_label}"
+            )
+            result = run_one_pass(
+                pipeline_script,
+                cwd,
+                video_path,
+                manifest_path,
+                ns.out_dir,
+                default_out,
+                ns.mid_search,
+                shared_extra,
+                pass_label,
+                pass_args,
+            )
+            results.append(result)
+            if result.status == "OK":
+                print(f"[OK] {video_path.name} / {pass_label}")
+            else:
+                print(f"[WARN] {video_path.name} / {pass_label}: {result.note}")
 
     write_summary(summary_path, results)
     ok_count = sum(1 for r in results if r.status == "OK")

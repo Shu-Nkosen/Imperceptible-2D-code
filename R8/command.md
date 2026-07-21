@@ -218,7 +218,7 @@ cd R8\make_movie
 
 ### 2.4 pair（標準）
 
-`pair` は重くなりやすいため、既定で **decode は全ペア実施**しつつ、保存する差分PNGは **成功ペア + 最高accuracyペア + 10枚に1枚** に間引かれます。全件は `qr_decode_all_frames.csv` で確認します。
+`pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします。保存する差分PNGはさらに **成功ペア + 最高accuracyペア + 10枚に1枚** に間引かれます。
 
 **パターン:** pair + fast + 120枚残す（いちばん標準）
 
@@ -467,7 +467,7 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | ディスク節約 | `--max-frames 1` |
 | 端点確認 | `--max-frames 2` |
 
-`pair` の差分PNGは既定で間引き保存されるため、目視用PNGが少なくても全件判定が減ったわけではありません。全件詳細は `qr_decode_all_frames.csv` を見ます。
+`pair` の差分PNGは既定で間引き保存されます。デコード対象も先頭20＋末尾20ペア（最大40）に限定されています。
 
 出力先: `R8/analyze_code/out/<動画stem>/`  
 （`results.csv`, `qr_decode_all_frames.csv`, 条件フォルダ, `rgb_max_diff_maps_th*` / `rgb_max_accum_n*_th*`）
@@ -476,34 +476,45 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 
 ## 4. 一括解析（all_analyze）
 
-`R8/movie` 内の命名規則に合う動画を、順番に `run_pipeline.py` で全部解析します。1本失敗しても続行します。
+`R8/movie` 内の命名規則に合う動画を順番に解析します。1本失敗しても続行します。
 
 ```bash
 python R8/analyze_code/all_analyze.py
 ```
 
-**既定:** `pair` + **fast**（gray×kernel5×最精度デコード1回）+ `--max-frames 120` + `--workers 4` + **切り出し再利用**  
-manifest は `R8/make_movie/manifests/r{rate}_e{exp}.json` を自動解決します。  
-`--workers` は実コア数で上限されます（例: 2コアPCなら自動で2）。  
-同じ動画を別 `--diff-mode` で連続実行すると、120枚切り出し済み条件はスキップされます（`--force-extract` で無効化）。
+**既定:** 各動画について次の **全5手法** を順に実行します。
+
+1. `pair`
+2. `accum`
+3. `stat`（std）
+4. `stat`（var）
+5. `fourier`
+
+共通: **fast** + `--max-frames 120` + `--workers 4` + **切り出し再利用**  
+動画順は rate → exp → fluoro。2手法目以降は切り出しを再利用します。  
+出力は手法別に `results_pair.csv` / `results_accum.csv` などとして残ります。  
+`--diff-mode ...` を付けた場合は、その手法だけ実行します。
 
 **例:**
 
 ```bash
-# 端点2枚だけ残して一括（fast）。再利用ONのため解析フレームは120枚残る
+# 全手法 × 全動画（既定）
+python R8/analyze_code/all_analyze.py
+
+# 全手法だが端点2枚指定（再利用中は120枚を残す）
 python R8/analyze_code/all_analyze.py --max-frames 2
 
-# accum で一括（直前の切り出しを再利用）
+# accum だけ
 python R8/analyze_code/all_analyze.py --diff-mode accum
 
-# fourier で一括（fast）
+# fourier だけ
 python R8/analyze_code/all_analyze.py --diff-mode fourier --max-frames 2
 
-# mid に切り替えて検証
-python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
+# mid に切り替えて全手法
+python R8/analyze_code/all_analyze.py --mid-search
 
 # 切り出しを強制やり直し
 python R8/analyze_code/all_analyze.py --force-extract
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`
+サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）

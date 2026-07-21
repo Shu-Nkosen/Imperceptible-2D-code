@@ -168,6 +168,21 @@ def collect_candidate_pairs(image_paths: List[Path], max_offset: int):
     return candidate_pairs
 
 
+def select_first_last_pairs(pairs: List[tuple], n_each: int) -> List[tuple]:
+    """先頭 n_each + 末尾 n_each ペアだけ返す（重複は除く）。"""
+    if n_each <= 0 or len(pairs) <= n_each * 2:
+        return pairs
+    selected = pairs[:n_each] + pairs[-n_each:]
+    seen: set[tuple] = set()
+    out: List[tuple] = []
+    for item in selected:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
 def collect_nonoverlap_windows(image_paths: List[Path], window_n: int) -> List[List[Path]]:
     """長さ window_n の非重複窓。余りフレームは捨てる。"""
     if window_n < 2:
@@ -179,18 +194,33 @@ def collect_nonoverlap_windows(image_paths: List[Path], window_n: int) -> List[L
     return windows
 
 
-def process_directory(target_dir: Path, colors, threshold: float, output_subdir: str = "") -> bool:
+def process_directory(
+    target_dir: Path,
+    colors,
+    threshold: float,
+    output_subdir: str = "",
+    pair_each_end: int = 0,
+) -> bool:
     image_paths = sorted(target_dir.glob(IMAGE_PATTERN))
     if not image_paths:
         return False
 
-    pairs = collect_candidate_pairs(image_paths, MAX_OFFSET)
-    if not pairs:
+    all_pairs = collect_candidate_pairs(image_paths, MAX_OFFSET)
+    if not all_pairs:
         print(f"[{target_dir.name}] 処理対象のペアがありません。")
         return True
 
+    pairs = select_first_last_pairs(all_pairs, pair_each_end)
+    if pair_each_end > 0 and len(pairs) < len(all_pairs):
+        print(
+            f"[INFO] [{target_dir.name}] pair limit: "
+            f"first/last {pair_each_end} each -> {len(pairs)}/{len(all_pairs)} pairs"
+        )
+
     output_dir = resolve_output_dir(target_dir, output_subdir)
     output_dir.mkdir(exist_ok=True, parents=True)
+    for old in output_dir.glob("*_rgbmax_scale*.png"):
+        old.unlink(missing_ok=True)
 
     cache = {}
 
@@ -460,6 +490,12 @@ def main():
         default=1,
         help="fourier 時の target_idx 前後ビン数（既定: 1）",
     )
+    parser.add_argument(
+        "--pair-each-end",
+        type=int,
+        default=0,
+        help="pair 時: 先頭/末尾それぞれ N ペアだけ処理（0=全ペア）",
+    )
     args = parser.parse_args()
 
     colors = {
@@ -513,7 +549,11 @@ def main():
                 )
             else:
                 ok = process_directory(
-                    target_dir, colors, threshold=threshold, output_subdir=output_subdir
+                    target_dir,
+                    colors,
+                    threshold=threshold,
+                    output_subdir=output_subdir,
+                    pair_each_end=int(args.pair_each_end),
                 )
             if ok:
                 processed_count += 1
