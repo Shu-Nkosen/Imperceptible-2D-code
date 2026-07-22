@@ -187,12 +187,16 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 
 | フラグ | モード | 二値化バリアント | メディアン kernel | 拡大 | デコード |
 |---|---|---|---|---|---|
-| （なし） | **fast**（既定） | `gray` | 5 | なし | 最精度経路を1回（`detectAndDecodeMulti`） |
-| `--mid-search` | **mid** | `gray`, `median_otsu` | **3, 5, 7** | なし | cascade + Multi |
-| `--full-search` | **full** | 10種（全種） | 5（既定） | 1/2/3 | cascade + Multi |
+| （なし） | **fast**（既定） | `gray` | 5 | なし | **ZXing 優先** → OpenCV Multi フォールバック |
+| `--mid-search` | **mid** | `gray`, `median_otsu` | **3, 5, 7** | なし | 各バリアントで ZXing → OpenCV cascade |
+| `--full-search` | **full** | 10種（全種） | 5（既定） | 1/2/3 | 同上（遅い） |
+
+デコードは **zxing-cpp**（C++ ZXing）を主、OpenCV を副とします（欠損・低コントラストに強い）。未インストール時は OpenCV のみ。  
+差分・統計・FFT は **PyTorch CUDA があれば GPU**、無ければ NumPy/SciPy（起動ログの `compute backend` を確認）。
 
 `--mid-search` はバリアント・カーネルを広げて読取を強化するモードです。両方指定した場合は `--full-search` が優先されます。`--median-kernels` を明示すると mid の既定 3/5/7 より優先されます。
-検証・一括解析の既定は **fast**（gray × kernel5 × 最精度デコード1回）です。
+検証・一括解析の既定は **fast**（gray × kernel5 × **ZXing優先**）です。
+差分計算は `compute backend` ログで GPU/CPU を確認できます（`torch`+CUDA 推奨: `R8/analyze_code/requirements.txt`）。
 既に切り出した条件フォルダだけ再デコードする場合の例:
 
 ```bash

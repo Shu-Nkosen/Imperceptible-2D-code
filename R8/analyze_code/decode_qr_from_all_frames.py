@@ -389,11 +389,54 @@ def trim_white_borders(gray: np.ndarray, white_min: int = 250) -> np.ndarray:
     return gray[y0:y1, x0:x1]
 
 
-def try_decode_multi_once(detector: cv2.QRCodeDetector, image: np.ndarray) -> Optional[str]:
-    """最も精度の高い OpenCV 経路（detectAndDecodeMulti）を1回だけ試す。
+def try_decode_zxing(image: np.ndarray) -> Optional[str]:
+    """ZXing (C++) — 欠損・低コントラストQRに強く、本パイプラインの主デコーダ。"""
+    try:
+        import zxingcpp
+    except ImportError:
+        return None
 
-    複数QRの同時検出が目的ではなく、単一QRでも Multi 経路の方が読めることが多いため。
-    """
+    if image is None or image.size == 0:
+        return None
+    if image.ndim == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+    if gray.dtype != np.uint8:
+        gray = np.clip(gray, 0, 255).astype(np.uint8)
+
+    formats = zxingcpp.BarcodeFormat.QRCode
+    attempts = (
+        {"formats": formats, "try_rotate": True, "try_downscale": True, "try_invert": True},
+        {
+            "formats": formats,
+            "try_rotate": True,
+            "try_downscale": True,
+            "try_invert": True,
+            "binarizer": zxingcpp.Binarizer.FixedThreshold,
+        },
+        {
+            "formats": formats,
+            "try_rotate": False,
+            "try_downscale": False,
+            "try_invert": True,
+            "is_pure": True,
+        },
+    )
+    for kwargs in attempts:
+        try:
+            results = zxingcpp.read_barcodes(gray, **kwargs)
+        except Exception:
+            continue
+        for barcode in results:
+            text = getattr(barcode, "text", None) or ""
+            if text:
+                return text
+    return None
+
+
+def try_decode_multi_once(detector: cv2.QRCodeDetector, image: np.ndarray) -> Optional[str]:
+    """OpenCV フォールバック（detectAndDecodeMulti）。"""
     try:
         retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image)
         if retval and decoded_info:
@@ -474,6 +517,13 @@ def decode_qr_from_diff(
 
     for variant_tag, target in iter_variant_targets(gray, median_gray, variant_order, scales):
         last_target = target
+        zx_text = try_decode_zxing(target)
+        if zx_text:
+            return (
+                zx_text,
+                f"zxing_{variant_tag}_k{median_kernel}_i{median_iterations}",
+                target,
+            )
         if decode_strategy == "best_once":
             text = try_decode_multi_once(detector, target)
         else:
@@ -481,7 +531,7 @@ def decode_qr_from_diff(
         if text:
             return (
                 text,
-                f"{variant_tag}_k{median_kernel}_i{median_iterations}",
+                f"opencv_{variant_tag}_k{median_kernel}_i{median_iterations}",
                 target,
             )
 
@@ -787,10 +837,17 @@ def main() -> None:
         )
     save_analysis = not args.no_save_analysis
 
+    try:
+        import zxingcpp  # noqa: F401
+
+        decode_backend = "zxing-cpp(+opencv fallback)"
+    except ImportError:
+        decode_backend = "opencv-only (pip install zxing-cpp 推奨)"
+
     print(
         f"[INFO] mode: {search_mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
         f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers} "
-        f"/ diff_subdir={DIFF_SUBDIR}"
+        f"/ diff_subdir={DIFF_SUBDIR} / decode={decode_backend}"
     )
 
     if args.base_dir:

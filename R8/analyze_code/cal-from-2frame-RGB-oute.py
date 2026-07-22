@@ -63,27 +63,16 @@ def load_image_as_rgb(image_path: Path, scale=1.0, method="bilinear"):
     return array
 
 def compute_max_channel_difference(img1: np.ndarray, img2: np.ndarray):
-    diff_all = img2 - img1
-    abs_diff = np.abs(diff_all)
-    max_indices = np.argmax(abs_diff, axis=2)
+    from gpu_ops import max_channel_difference
 
-    selected = np.take_along_axis(diff_all, max_indices[..., None], axis=2).squeeze(-1)
-    sum_all = diff_all.sum(axis=2)
-    other_mean = (sum_all - selected) / 2.0  # 選択チャネル以外の平均
-    diff_map = selected - other_mean         # ノイズ除去後の差分
-
-    return diff_map
+    return max_channel_difference(img1, img2)
 
 
 def compute_max_channel_signal(img: np.ndarray) -> np.ndarray:
     """1フレームから max-channel 強調のスカラー場を作る。"""
-    mean_all = img.mean(axis=2, keepdims=True)
-    abs_dev = np.abs(img - mean_all)
-    max_indices = np.argmax(abs_dev, axis=2)
-    selected = np.take_along_axis(img, max_indices[..., None], axis=2).squeeze(-1)
-    sum_all = img.sum(axis=2)
-    other_mean = (sum_all - selected) / 2.0
-    return selected - other_mean
+    from gpu_ops import max_channel_signal
+
+    return max_channel_signal(img)
 
 def classify_luminance_change(img1: np.ndarray, img2: np.ndarray, threshold: float):
     diff_map = compute_max_channel_difference(img1, img2)
@@ -334,24 +323,23 @@ def process_directory_stat(
             cache[path] = load_image_as_rgb(path, QUALITY_SCALE, RESIZE_METHOD)
         return cache[path]
 
-    series: List[np.ndarray] = []
     base_shape = None
+    rgb_list: List[np.ndarray] = []
     for path in image_paths:
         img = get_image(path)
         if base_shape is None:
             base_shape = img.shape
         elif img.shape != base_shape:
             raise ValueError(f"画像サイズが一致しません: {path.name} {img.shape} vs {base_shape}")
-        series.append(compute_max_channel_signal(img))
+        rgb_list.append(img)
 
-    if not series:
+    from gpu_ops import backend_name, stack_max_channel_signals, temporal_std_var
+
+    print(f"[INFO] compute backend: {backend_name()}")
+    stack = stack_max_channel_signals(rgb_list)
+    if stack.shape[0] == 0:
         return True
-
-    stack = np.stack(series, axis=0)
-    if stat_kind == "var":
-        stat_map = np.var(stack, axis=0)
-    else:
-        stat_map = np.std(stack, axis=0)
+    stat_map = temporal_std_var(stack, stat_kind)
 
     increased, decreased, unchanged = classify_stat_change(stat_map, threshold)
     output_dir = resolve_output_dir(target_dir, output_subdir)
@@ -395,20 +383,23 @@ def process_directory_fourier(
             cache[path] = load_image_as_rgb(path, QUALITY_SCALE, RESIZE_METHOD)
         return cache[path]
 
-    series: List[np.ndarray] = []
     base_shape = None
+    rgb_list: List[np.ndarray] = []
     for path in image_paths:
         img = get_image(path)
         if base_shape is None:
             base_shape = img.shape
         elif img.shape != base_shape:
             raise ValueError(f"画像サイズが一致しません: {path.name} {img.shape} vs {base_shape}")
-        series.append(compute_max_channel_signal(img))
+        rgb_list.append(img)
 
-    if not series:
+    from gpu_ops import backend_name, stack_max_channel_signals
+
+    print(f"[INFO] compute backend: {backend_name()}")
+    stack = stack_max_channel_signals(rgb_list)
+    if stack.shape[0] == 0:
         return True
 
-    stack = np.stack(series, axis=0)
     score_map = build_score_map(stack, fps, target_freq, band_radius=band_radius)
     norm_map = normalize_score_map(score_map)
 
@@ -509,6 +500,12 @@ def main():
         raise FileNotFoundError(f"base-dir が存在しません: {base_dir}")
     print(f"[INFO] base_dir: {base_dir}")
     print(f"[INFO] diff_mode: {args.diff_mode}")
+    try:
+        from gpu_ops import backend_name
+
+        print(f"[INFO] compute backend: {backend_name()}")
+    except Exception as exc:
+        print(f"[WARN] compute backend probe failed: {exc}")
 
     threshold = float(args.threshold) / 255.0
     output_subdir = args.output_subdir.strip() or str(OUTPUT_DIR)

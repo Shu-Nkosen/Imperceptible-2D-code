@@ -77,15 +77,16 @@ def build_score_map(
     band_radius: int = 1,
     use_window: bool = True,
 ) -> np.ndarray:
-    """(T,H,W) → (H,W) の FFT スコアマップ（target_amp / noise_floor）。"""
-    freqs, amplitude = compute_frequency_spectrum(frames, fps, use_window=use_window)
-    _, band = resolve_target_band(freqs, target_freq, band_radius=band_radius)
-    target_amplitude = amplitude[band].max(axis=0)
-    if amplitude.shape[0] > 1:
-        noise_floor = amplitude[1:].mean(axis=0)
-    else:
-        noise_floor = amplitude[0]
-    return target_amplitude / (noise_floor + 1e-12)
+    """(T,H,W) → (H,W) の FFT スコアマップ（target_amp / noise_floor）。GPU 優先。"""
+    from gpu_ops import frequency_score_map
+
+    return frequency_score_map(
+        frames,
+        fps=fps,
+        target_freq=target_freq,
+        band_radius=band_radius,
+        use_window=use_window,
+    )
 
 
 def normalize_score_map(score_map: np.ndarray) -> np.ndarray:

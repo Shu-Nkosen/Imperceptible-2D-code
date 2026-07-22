@@ -459,8 +459,9 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | 用途 | コマンド要点 |
 |---|---|
 | 標準解析 | （フラグなし）= pair + fast + max-frames 120 |
-| 読み取り強化 | `--mid-search` または `--full-search` |
+| 読み取り強化 | `--mid-search` または `--full-search`（前処理増。デコーダは ZXing 優先のまま） |
 | ログ要約 | `--quiet`（対象・モード・結果のみ。一括実行では自動付与） |
+| GPU | `pip install torch`（CUDA版推奨）。差分/統計/FFT が自動で GPU 利用 |
 | 窓合算 | `--diff-mode accum` |
 | 統計解析 | `--diff-mode stat`（`--stat-kind var` で分散） |
 | 時間軸FFT | `--diff-mode fourier`（`--target-freqs 15,7.5` で周波数上書き） |
