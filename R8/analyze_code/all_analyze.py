@@ -214,6 +214,8 @@ def build_pipeline_args(
         extra = ["--max-frames", "120", *extra]
     if not has_cli_flag(extra, "--workers"):
         extra = ["--workers", "4", *extra]
+    if not has_cli_flag(extra, "--quiet"):
+        extra = ["--quiet", *extra]
     if (
         mid_search
         and "--mid-search" not in extra
@@ -243,7 +245,11 @@ def archive_pass_outputs(out_root: Path, pass_label: str) -> None:
             continue
         dst = out_root / f"{src.stem}_{safe}{src.suffix}"
         shutil.copy2(src, dst)
-        print(f"[INFO] archived {src.name} -> {dst.name}")
+
+
+def _tail_lines(text: str, n: int = 20) -> List[str]:
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    return lines[-n:] if lines else []
 
 
 def run_one_pass(
@@ -257,43 +263,84 @@ def run_one_pass(
     shared_extra: Sequence[str],
     pass_label: str,
     pass_args: Sequence[str],
-) -> RunResult:
+) -> Tuple[RunResult, str]:
+    """戻り値: (RunResult, captured_output)。失敗時の末尾表示用に出力を返す。"""
     args = build_pipeline_args(
         video_path, manifest_path, out_dir, mid_search, shared_extra, pass_args
     )
     cmd = [sys.executable, str(pipeline_script), *args]
-    print(f"[INFO] run [{pass_label}]: {' '.join(cmd)}")
+    captured = ""
     try:
-        completed = subprocess.run(cmd, cwd=str(cwd), check=False)
+        completed = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         exit_code = int(completed.returncode)
+        captured = "\n".join(
+            part for part in (completed.stdout or "", completed.stderr or "") if part
+        )
         out_root = resolve_out_root(video_path, out_dir, default_out)
         archive_pass_outputs(out_root, pass_label)
         if exit_code == 0:
-            return RunResult(
+            return (
+                RunResult(
+                    video=video_path,
+                    pass_label=pass_label,
+                    manifest=str(manifest_path),
+                    status="OK",
+                    exit_code=exit_code,
+                    note="",
+                ),
+                captured,
+            )
+        return (
+            RunResult(
                 video=video_path,
                 pass_label=pass_label,
                 manifest=str(manifest_path),
-                status="OK",
+                status="FAIL",
                 exit_code=exit_code,
-                note="",
-            )
-        return RunResult(
-            video=video_path,
-            pass_label=pass_label,
-            manifest=str(manifest_path),
-            status="FAIL",
-            exit_code=exit_code,
-            note=f"run_pipeline exit={exit_code}",
+                note=f"run_pipeline exit={exit_code}",
+            ),
+            captured,
         )
     except Exception as exc:
-        return RunResult(
-            video=video_path,
-            pass_label=pass_label,
-            manifest=str(manifest_path),
-            status="FAIL",
-            exit_code=-1,
-            note=str(exc),
+        return (
+            RunResult(
+                video=video_path,
+                pass_label=pass_label,
+                manifest=str(manifest_path),
+                status="FAIL",
+                exit_code=-1,
+                note=str(exc),
+            ),
+            captured,
         )
+
+
+def print_job_lines(
+    job_i: int,
+    total_jobs: int,
+    video_name: str,
+    pass_label: str,
+    result: RunResult,
+    captured: str = "",
+) -> None:
+    prefix = f"[{job_i}/{total_jobs}]"
+    print(f"{prefix} target: {video_name}")
+    print(f"{prefix} pass:   {pass_label}")
+    if result.status == "OK":
+        print(f"{prefix} result: OK")
+        return
+    note = result.note.strip() or "FAIL"
+    print(f"{prefix} result: FAIL ({note})")
+    for line in _tail_lines(captured, 20):
+        print(f"         {line}")
 
 
 def write_summary(path: Path, results: List[RunResult]) -> None:
@@ -328,10 +375,10 @@ def main() -> int:
 
     passes, shared_extra = resolve_analysis_passes(pipeline_extra)
     videos, rejected = discover_videos(movie_dir)
-    print(f"[INFO] movie_dir={movie_dir}")
-    print(f"[INFO] manifest_dir={manifest_dir}")
-    print(f"[INFO] target_videos={len(videos)} rejected_by_name={len(rejected)}")
-    print(f"[INFO] analysis_passes={[label for label, _ in passes]}")
+    print(
+        f"[INFO] videos={len(videos)} rejected={len(rejected)} "
+        f"passes={[label for label, _ in passes]}"
+    )
     if rejected:
         print("[WARN] skipped (invalid name):")
         for path in rejected:
@@ -344,8 +391,7 @@ def main() -> int:
     results: List[RunResult] = []
     total_jobs = len(videos) * len(passes)
     job_i = 0
-    for vi, video_path in enumerate(videos, 1):
-        print(f"[INFO] ({vi}/{len(videos)}) {video_path.name}")
+    for video_path in videos:
         manifest_path = resolve_manifest(video_path, manifest_dir)
         if manifest_path is None:
             meta = parse_video_name(video_path)
@@ -355,26 +401,23 @@ def main() -> int:
                 else "r{rate}_e{exp}.json"
             )
             note = f"manifest not found: {manifest_dir / expected}"
-            print(f"[WARN] {note}")
             for pass_label, _ in passes:
-                results.append(
-                    RunResult(
-                        video=video_path,
-                        pass_label=pass_label,
-                        manifest="",
-                        status="FAIL",
-                        exit_code=-1,
-                        note=note,
-                    )
+                job_i += 1
+                fail = RunResult(
+                    video=video_path,
+                    pass_label=pass_label,
+                    manifest="",
+                    status="FAIL",
+                    exit_code=-1,
+                    note=note,
                 )
+                results.append(fail)
+                print_job_lines(job_i, total_jobs, video_path.name, pass_label, fail)
             continue
 
         for pass_label, pass_args in passes:
             job_i += 1
-            print(
-                f"[INFO] ({job_i}/{total_jobs}) {video_path.name} / {pass_label}"
-            )
-            result = run_one_pass(
+            result, captured = run_one_pass(
                 pipeline_script,
                 cwd,
                 video_path,
@@ -387,10 +430,9 @@ def main() -> int:
                 pass_args,
             )
             results.append(result)
-            if result.status == "OK":
-                print(f"[OK] {video_path.name} / {pass_label}")
-            else:
-                print(f"[WARN] {video_path.name} / {pass_label}: {result.note}")
+            print_job_lines(
+                job_i, total_jobs, video_path.name, pass_label, result, captured
+            )
 
     write_summary(summary_path, results)
     ok_count = sum(1 for r in results if r.status == "OK")

@@ -460,6 +460,7 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 |---|---|
 | 標準解析 | （フラグなし）= pair + fast + max-frames 120 |
 | 読み取り強化 | `--mid-search` または `--full-search` |
+| ログ要約 | `--quiet`（対象・モード・結果のみ。一括実行では自動付与） |
 | 窓合算 | `--diff-mode accum` |
 | 統計解析 | `--diff-mode stat`（`--stat-kind var` で分散） |
 | 時間軸FFT | `--diff-mode fourier`（`--target-freqs 15,7.5` で周波数上書き） |
@@ -494,6 +495,8 @@ python R8/analyze_code/all_analyze.py
 動画順は rate → exp → fluoro。2手法目以降は切り出しを再利用します。  
 出力は手法別に `results_pair.csv` / `results_accum.csv` などとして残ります。  
 `--diff-mode ...` を付けた場合は、その手法だけ実行します。
+
+**ログ:** ジョブごとに `target` / `pass` / `result` の3行のみ。詳細はキャプチャし、失敗時だけ末尾を表示。単体 `run_pipeline` は詳細ログ、`--quiet` で要約のみ。
 
 **例:**
 

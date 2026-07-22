@@ -181,6 +181,7 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 - `--target-freqs`: fourier 時のターゲット周波数 Hz（カンマ区切り。未指定時は rate_hz+fps から第一候補+半分を自動）
 - `--fourier-band-radius`: fourier 時の FFT ビン前後幅（既定 `1`）
 - `--diff-thresholds`: 閾値スイープ（カンマ区切り。未指定時は mode・stat-kind ごとの既定）
+- `--quiet`: INFO ログを抑制し、対象・モード・結果の要約だけ出す（一括実行では自動付与）
 - 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
 - QR探索モード（`decode_qr_from_all_frames.py` に渡る）:
 
@@ -389,6 +390,14 @@ python R8/analyze_code/all_analyze.py
 共通設定は **fast** + `--max-frames 120` + `--workers 4` + **切り出し再利用**。  
 手法ごとの結果は `results_<pass>.csv` / `qr_decode_all_frames_<pass>.csv` として残ります（例: `results_pair.csv`）。  
 `--diff-mode accum` など手法を明示した場合は、その手法だけ実行します。
+
+**ログ:** 一括実行はジョブ（動画×手法）ごとに次の3行だけ出します（`run_pipeline` の詳細ログはキャプチャして端末に流しません）。失敗時のみ末尾ログを短く表示します。単体の `run_pipeline.py` は従来どおり詳細表示（`--quiet` で要約のみにもできます）。
+
+```text
+[12/150] target: r180_e250_f1.mp4
+[12/150] pass:   pair
+[12/150] result: OK
+```
 
 ```bash
 python R8/analyze_code/all_analyze.py --max-frames 2
