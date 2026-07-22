@@ -64,8 +64,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--workers",
         type=int,
-        default=4,
-        help="decode_qr_from_all_frames.py に渡す並列数（既定: 4。実コア数を超えないよう上限あり）",
+        default=16,
+        help="decode_qr_from_all_frames.py に渡す並列数（既定: 16。実コア数を超えないよう上限あり）",
     )
     p.add_argument(
         "--reuse-frames",

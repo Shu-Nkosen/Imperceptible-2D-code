@@ -216,7 +216,7 @@ def build_pipeline_args(
     if not has_cli_flag(extra, "--max-frames"):
         extra = ["--max-frames", "120", *extra]
     if not has_cli_flag(extra, "--workers"):
-        extra = ["--workers", "4", *extra]
+        extra = ["--workers", "16", *extra]
     if not has_cli_flag(extra, "--quiet"):
         extra = ["--quiet", *extra]
     if (

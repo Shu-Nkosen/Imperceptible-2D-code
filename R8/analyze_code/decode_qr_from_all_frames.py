@@ -782,8 +782,8 @@ def main() -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=4,
-        help="並列ワーカー数（既定: 4。実コア数を超えないよう自動上限。1で逐次処理）",
+        default=16,
+        help="並列ワーカー数（既定: 16。実コア数を超えないよう自動上限。1で逐次処理）",
     )
     parser.add_argument(
         "--no-save-analysis",
