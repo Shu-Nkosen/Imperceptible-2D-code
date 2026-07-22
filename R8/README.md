@@ -113,7 +113,7 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 | `stat` | 120フレーム時系列の各ピクセル統計（`std`/`var`）を二値化 | std: th = **4 / 8 / 12**、var: th = **1 / 2 / 4** |
 | `fourier` | 120フレーム時系列の時間軸FFT（max-channel）で特定周波数成分を抽出 | 第一候補+半分の2周波数 × th = **4 / 8 / 12** |
 
-デコード成功したもののうち `pixel_acc_ok` が最大の組み合わせを `results.csv` に採用します（同点なら小さい th、さらに同点なら小さい n）。
+デコード成否に関係なく、**`pixel_acc_all`（全ペア／窓の平均正解率）が最大**の組み合わせを `results.csv` に採用します（同点ならデコード成功優先 → 小さい th → 小さい n → 第一候補周波数）。失敗時も同じ基準で th / 窓長を書きます。
 `pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします（`--pair-each-end 20`）。保存する差分PNGはさらに **成功ペア + 最高accuracyペア + 10枚に1枚** に間引きます。
 `--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
 
@@ -181,6 +181,7 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 - `--target-freqs`: fourier 時のターゲット周波数 Hz（カンマ区切り。未指定時は rate_hz+fps から第一候補+半分を自動）
 - `--fourier-band-radius`: fourier 時の FFT ビン前後幅（既定 `1`）
 - `--diff-thresholds`: 閾値スイープ（カンマ区切り。未指定時は mode・stat-kind ごとの既定）
+- `--quiet`: INFO ログを抑制し、対象・モード・結果の要約だけ出す（一括実行では自動付与）
 - 切り出し区間の既定: `--use-start-sec 2 --use-end-sec 4`（60fpsならちょうど約120枚）
 - QR探索モード（`decode_qr_from_all_frames.py` に渡る）:
 
@@ -261,6 +262,7 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `qr_decode_all_frames.csv` | 同上 | **差分1枚（ペア/窓）** ごとのデコード詳細（全閾値スイープ含む） |
 | `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別アーカイブ |
 | `all_analyze_summary.csv` | `out/` | **動画×手法** ごとの成否サマリー |
+| `all_analyze_timing.csv` | `out/` | **動画×手法** ごとの所要時間（追記・蓄積） |
 
 1回の `run_pipeline` は **1つの `diff_mode` のみ**。モード比較は `results_pair.csv` と `results_fourier.csv` などを並べて見ます。
 
@@ -281,7 +283,7 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `fft_target_hz` | fourier で**採用した**ターゲット周波数（Hz）。他モードは空 |
 | `diff_threshold` | **採用した**差分二値化閾値（0–255 スケール、例: `8`） |
 | `pixel_acc_all` | その条件の全ペア/窓について、GT QR（`frame_QR.png`）との画素一致率の**平均**（0〜1）。GT 無しは空 |
-| `pixel_acc_ok` | 上記のうち **デコード成功したものだけ** の平均。採用スコアの目安 |
+| `pixel_acc_ok` | 上記のうち **デコード成功したものだけ** の平均 |
 | `pixel_acc_best` | 全ペア/窓のうち **最大** の画素一致率（0〜1）。GT 無しは空 |
 | `best_pair_frame_1` | `pixel_acc_best` を出したペア/窓の左端フレーム |
 | `best_pair_frame_2` | 同上・右端フレーム |
@@ -303,7 +305,7 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `analysis_frames` | 切り出して解析に使ったフレーム数（通常 120） |
 | `extract_sec` | 切り出し区間の秒数（再利用時は 0） |
 
-**採用ルール:** 各条件で閾値（＋ accum なら窓長、fourier なら周波数）を総当たりし、**デコード成功のうち `pixel_acc_ok` 最大**の組み合わせを1行に載せます。
+**採用ルール:** 各条件で閾値（＋ accum なら窓長、fourier なら周波数）を総当たりし、**`pixel_acc_all` 最大**の組み合わせを1行に載せます（デコード失敗時も同様。同点ならデコード成功 → 小さい th → 小さい n）。
 
 ---
 
@@ -368,6 +370,19 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `exit_code` | `run_pipeline` の終了コード（0 = 成功） |
 | `note` | 失敗理由（manifest 不在、`run_pipeline exit=1` 等） |
 
+### `all_analyze_timing.csv`（所要時間・追記蓄積）
+
+`out/all_analyze_timing.csv`。実行のたびに**追記**し、過去行は残します。
+
+| 列 | 説明 |
+|----|------|
+| `finished_at` | ジョブ完了時刻（`YYYY-MM-DD HH:MM:SS`） |
+| `video` | 動画ファイル名 |
+| `pass` | 解析手法 |
+| `status` | `OK` / `FAIL` |
+| `elapsed_sec` | 所要秒（小数1桁） |
+| `note` | 失敗理由（成功時は空） |
+
 ---
 
 ## 一括解析（全動画）
@@ -390,6 +405,14 @@ python R8/analyze_code/all_analyze.py
 手法ごとの結果は `results_<pass>.csv` / `qr_decode_all_frames_<pass>.csv` として残ります（例: `results_pair.csv`）。  
 `--diff-mode accum` など手法を明示した場合は、その手法だけ実行します。
 
+**ログ:** 一括実行はジョブ（動画×手法）ごとに次の3行だけ出します（`run_pipeline` の詳細ログはキャプチャして端末に流しません）。失敗時のみ末尾ログを短く表示します。単体の `run_pipeline.py` は従来どおり詳細表示（`--quiet` で要約のみにもできます）。
+
+```text
+[12/150] target: r180_e250_f1.mp4
+[12/150] pass:   pair
+[12/150] result: OK
+```
+
 ```bash
 python R8/analyze_code/all_analyze.py --max-frames 2
 python R8/analyze_code/all_analyze.py --diff-mode accum
@@ -398,5 +421,6 @@ python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
 python R8/analyze_code/all_analyze.py --force-extract
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）
+サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）  
+所要時間: `R8/analyze_code/out/all_analyze_timing.csv`（追記蓄積。`finished_at`, `video`, `pass`, `status`, `elapsed_sec`, `note`）
 

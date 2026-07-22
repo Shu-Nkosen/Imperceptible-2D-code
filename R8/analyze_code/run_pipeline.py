@@ -15,6 +15,22 @@ import numpy as np
 from naming import VideoNameMeta, parse_video_name
 from time_fft import format_freq_label, resolve_target_freqs
 
+_QUIET = False
+
+
+def set_quiet(quiet: bool) -> None:
+    global _QUIET
+    _QUIET = bool(quiet)
+
+
+def log_info(msg: str) -> None:
+    if not _QUIET:
+        print(msg)
+
+
+def log_warn(msg: str) -> None:
+    print(msg)
+
 
 @dataclass(frozen=True)
 class SyncConfig:
@@ -111,6 +127,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="fourier 時の target_idx 前後ビン数（既定: 1）",
+    )
+    p.add_argument(
+        "--quiet",
+        action="store_true",
+        help="INFO ログを抑制し、対象・モード・結果の要約だけ出す（子プロセス出力も抑制）",
     )
     return p.parse_args()
 
@@ -761,13 +782,13 @@ def extract_gt_qr_mask(
                 slot_masks += 1
             except Exception:
                 continue
-        print(
+        log_info(
             f"[INFO] GT QR slot={slot.get('name')} "
             f"start_sec_from_sync={start_sec:.3f} dur={dur_sec:.3f} samples_ok={slot_masks}"
         )
 
     if not masks:
-        print("[WARN] GT QR: no frames extracted; pixel_acc will stay empty")
+        log_warn("[WARN] GT QR: no frames extracted; pixel_acc will stay empty")
         return False
 
     stacked = np.stack(masks, axis=0)
@@ -776,7 +797,7 @@ def extract_gt_qr_mask(
     merged = np.where(black_votes >= (len(masks) / 2.0), 0, 255).astype(np.uint8)
     ensure_dir(out_path.parent)
     cv2.imwrite(str(out_path), merged)
-    print(f"[OK] wrote GT mask: {out_path} (from {len(masks)} samples)")
+    log_info(f"[OK] wrote GT mask: {out_path} (from {len(masks)} samples)")
     return True
 
 
@@ -788,7 +809,16 @@ def read_manifest(path: Path) -> Dict[str, Any]:
 
 def run_py(script: Path, cwd: Path, args: List[str]) -> None:
     cmd = ["python", str(script), *args]
-    subprocess.run(cmd, cwd=str(cwd), check=True)
+    if _QUIET:
+        subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        subprocess.run(cmd, cwd=str(cwd), check=True)
 
 
 def load_decode_csv(path: Path) -> List[Dict[str, str]]:
@@ -887,11 +917,12 @@ def resolve_conditions(manifest: Dict[str, Any], n: int) -> List[Dict[str, Any]]
 
 def main() -> None:
     ns = parse_args()
+    set_quiet(bool(ns.quiet))
 
     video_path = Path(ns.video).resolve()
     meta: Optional[VideoNameMeta] = parse_video_name(video_path)
     if meta is None:
-        print(f"[WARN] video name does not match r{{rate}}_e{{exp}}_f{{0|1}}.mp4: {video_path.name}")
+        log_warn(f"[WARN] video name does not match r{{rate}}_e{{exp}}_f{{0|1}}.mp4: {video_path.name}")
 
     base_out = Path(ns.out_dir) if ns.out_dir else (Path(__file__).resolve().parent / "out")
     if not base_out.is_absolute():
@@ -908,14 +939,14 @@ def main() -> None:
 
     cfg = SyncConfig()
     sync_frame, fps = detect_black_to_red_sync(video_path, cfg)
-    print(f"[OK] SYNC at frame={sync_frame}, fps={fps:.4f}")
+    log_info(f"[OK] SYNC at frame={sync_frame}, fps={fps:.4f}")
 
     use_start = int(round(float(ns.use_start_sec) * fps))
     use_end = int(round(float(ns.use_end_sec) * fps))
     if use_end <= use_start:
         raise SystemExit("use-end-sec must be > use-start-sec")
     use_duration_sec = float(ns.use_end_sec) - float(ns.use_start_sec)
-    print(
+    log_info(
         f"[INFO] use_window=[{ns.use_start_sec:.3f}, {ns.use_end_sec:.3f})s "
         f"duration={use_duration_sec:.3f}s / fps={fps:.4f} -> "
         f"window_frames={use_end - use_start}, analysis_frames={ANALYSIS_FRAME_COUNT} (consecutive)"
@@ -926,23 +957,23 @@ def main() -> None:
     cond_starts_sec, gt_slots, qr_sec = resolve_gt_qr_timeline(
         manifest, slate_sec, padding_sec, block_sec, len(conditions)
     )
-    print(
+    log_info(
         f"[INFO] timeline from sync: slate+padding={slate_sec + padding_sec:.3f}s, "
         f"gt_qr_sec={qr_sec:.3f}, slots={len(gt_slots)}, conditions={len(conditions)}"
     )
     for s in gt_slots:
-        print(
+        log_info(
             f"[INFO]   QR {s.get('name')}: start_sec_from_sync={s['start_sec_from_sync']:.3f} "
             f"(before cond {s.get('insert_before_cond')})"
         )
 
     gt_path = out_root / "frame_QR.png"
     if ns.reuse_frames and gt_path.exists():
-        print(f"[INFO] reuse GT QR mask: {gt_path.name}")
+        log_info(f"[INFO] reuse GT QR mask: {gt_path.name}")
     else:
         extract_gt_qr_mask(video_path, sync_frame, fps, gt_slots, gt_path)
 
-    print(
+    log_info(
         f"[INFO] block0(cond0) ≈ sync + {cond_starts_sec[0]:.3f}s "
         f"(frame {sync_frame + int(round(cond_starts_sec[0] * fps))}), "
         f"slate_sec={slate_sec}, padding_sec={padding_sec}, block_sec={block_sec}"
@@ -987,7 +1018,7 @@ def main() -> None:
                 "fourier 解析には動画名から rate_hz を読むか --target-freqs を指定してください"
             )
         sweep = [(None, freq, th) for freq in target_freqs for th in diff_thresholds]
-        print(
+        log_info(
             f"[INFO] fourier target_freqs={[f'{f:.3f}' for f in target_freqs]} "
             f"band_radius={fourier_band_radius} camera_fps={fps:.4f}"
         )
@@ -996,17 +1027,24 @@ def main() -> None:
         diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_PAIR)
         sweep = [(None, None, th) for th in diff_thresholds]
 
-    print(
-        f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
-        f"/ diff_mode={diff_mode} "
-        f"/ stat_kind={(stat_kind if stat_kind else '-')} "
-        f"/ target_freqs={([f'{f:.3f}' for f in target_freqs] if target_freqs else '-')} "
-        f"/ window_ns={list(window_ns) if window_ns else '-'} "
-        f"/ diff_thresholds={list(diff_thresholds)} "
-        f"/ pair_each_end={(PAIR_OUTPUT_EACH_END if diff_mode == 'pair' else '-')} "
-        f"/ reuse_frames={ns.reuse_frames} "
-        "/ results+decode CSV overwritten after each condition (accumulated)"
-    )
+    if _QUIET:
+        mode_bits = [diff_mode]
+        if stat_kind:
+            mode_bits.append(stat_kind)
+        print(f"target: {video_path.name}")
+        print(f"mode:   {'/'.join(mode_bits)}")
+    else:
+        log_info(
+            f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
+            f"/ diff_mode={diff_mode} "
+            f"/ stat_kind={(stat_kind if stat_kind else '-')} "
+            f"/ target_freqs={([f'{f:.3f}' for f in target_freqs] if target_freqs else '-')} "
+            f"/ window_ns={list(window_ns) if window_ns else '-'} "
+            f"/ diff_thresholds={list(diff_thresholds)} "
+            f"/ pair_each_end={(PAIR_OUTPUT_EACH_END if diff_mode == 'pair' else '-')} "
+            f"/ reuse_frames={ns.reuse_frames} "
+            "/ results+decode CSV overwritten after each condition (accumulated)"
+        )
 
     reused_conditions = 0
     extracted_conditions = 0
@@ -1024,7 +1062,7 @@ def main() -> None:
             analyzed = count_consecutive_analysis_frames(cond_dir)
             extract_sec = 0.0
             reused_conditions += 1
-            print(
+            log_info(
                 f"[INFO] ({i+1}/{len(conditions)}) reuse {folder_name}: "
                 f"frames={analyzed} (skip extract)"
             )
@@ -1038,13 +1076,13 @@ def main() -> None:
             )
             extract_sec = (analyzed / fps) if fps > 0 else 0.0
             extracted_conditions += 1
-            print(
+            log_info(
                 f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: "
                 f"frames={analyzed} span≈{extract_sec:.3f}s "
                 f"(video [{start}, {start + analyzed}))"
             )
         if analyzed < ANALYSIS_FRAME_COUNT:
-            print(
+            log_warn(
                 f"[WARN] {folder_name}: expected {ANALYSIS_FRAME_COUNT} frames, got {analyzed}. "
                 "切り出しが不完全です（シーク失敗の可能性）。"
             )
@@ -1056,21 +1094,30 @@ def main() -> None:
         best_fft_freq: Optional[float] = None
         best_rows: List[Dict[str, str]] = []
         folder_decode_rows: List[Dict[str, str]] = []
-        # (window_n, fft_freq, th, decode_row, rows, pixel_acc_ok, freq_rank)
-        success_candidates: List[
-            Tuple[Optional[int], Optional[float], int, Dict[str, str], List[Dict[str, str]], float, int]
+        # (window_n, fft_freq, th, decode_row, rows, pixel_acc_all, decode_ok, freq_rank)
+        sweep_candidates: List[
+            Tuple[
+                Optional[int],
+                Optional[float],
+                int,
+                Dict[str, str],
+                List[Dict[str, str]],
+                float,
+                bool,
+                int,
+            ]
         ] = []
         freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
 
         if analyzed <= 0:
             decode_note = "extract失敗: 0 frames"
-            print(f"[WARN] {folder_name}: {decode_note}")
+            log_warn(f"[WARN] {folder_name}: {decode_note}")
         else:
             for win_n, fft_freq, th in sweep:
                 if diff_mode == "accum":
                     assert win_n is not None
                     diff_subdir = f"rgb_max_accum_n{win_n}_th{th}"
-                    print(
+                    log_info(
                         f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: "
                         f"accum window_n={win_n} threshold={th}"
                     )
@@ -1088,7 +1135,7 @@ def main() -> None:
                     ]
                 elif diff_mode == "stat":
                     diff_subdir = f"rgb_max_stat_{stat_kind}_th{th}"
-                    print(
+                    log_info(
                         f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: "
                         f"stat kind={stat_kind} threshold={th}"
                     )
@@ -1108,7 +1155,7 @@ def main() -> None:
                     assert fft_freq is not None
                     freq_label = format_freq_label(fft_freq)
                     diff_subdir = f"rgb_max_fourier_{freq_label}_th{th}"
-                    print(
+                    log_info(
                         f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: "
                         f"fourier target={fft_freq:.3f}Hz threshold={th}"
                     )
@@ -1130,7 +1177,7 @@ def main() -> None:
                     ]
                 else:
                     diff_subdir = f"rgb_max_diff_maps_th{th}"
-                    print(f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: threshold={th}")
+                    log_info(f"[INFO] ({i+1}/{len(conditions)}) {folder_name}: threshold={th}")
                     diff_args = [
                         "--base-dir",
                         cond_dir_abs,
@@ -1153,7 +1200,7 @@ def main() -> None:
                         label = f"freq={fft_freq:.3f} th={th}"
                     else:
                         label = f"th={th}"
-                    print(f"[WARN] {folder_name}: diff失敗 {label} exit={exc.returncode}")
+                    log_warn(f"[WARN] {folder_name}: diff失敗 {label} exit={exc.returncode}")
                     continue
 
                 decode_args = [
@@ -1182,7 +1229,7 @@ def main() -> None:
                         label = f"freq={fft_freq:.3f} th={th}"
                     else:
                         label = f"th={th}"
-                    print(f"[WARN] {folder_name}: decode失敗 {label} exit={exc.returncode}")
+                    log_warn(f"[WARN] {folder_name}: decode失敗 {label} exit={exc.returncode}")
                     continue
 
                 th_rows = [r for r in load_decode_csv(decode_csv) if r.get("folder") == folder_name]
@@ -1201,7 +1248,7 @@ def main() -> None:
                     diff_dir = cond_dir / diff_subdir
                     keep_set, keep_stats = select_keep_diff_images(th_rows, diff_dir, stride=10)
                     kept, removed = prune_diff_images(diff_dir, keep_set)
-                    print(
+                    log_info(
                         f"[INFO] {folder_name}: pair prune kept={kept} removed={removed} "
                         f"(success={keep_stats['success']}, best_acc={keep_stats['best_acc']}, "
                         f"stride={keep_stats['stride']})"
@@ -1209,68 +1256,82 @@ def main() -> None:
 
                 dec_th = pick_decode_row_for_folder(th_rows, folder_name)
                 ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
+                acc_all_str, acc_ok_str = pixel_accuracy_for_folder(th_rows, folder_name)
+                if acc_all_str:
+                    acc_all_val = float(acc_all_str)
+                else:
+                    acc_all_val = float("-inf")
+                freq_rank = freq_rank_map.get(fft_freq, 0) if fft_freq is not None else 0
+                sweep_candidates.append(
+                    (win_n, fft_freq, th, dec_th, tagged_rows, acc_all_val, ok, freq_rank)
+                )
+                if win_n is not None:
+                    n_label = f"n={win_n} "
+                elif fft_freq is not None:
+                    n_label = f"freq={fft_freq:.3f}Hz "
+                else:
+                    n_label = ""
                 if ok:
-                    _, acc_ok = pixel_accuracy_for_folder(th_rows, folder_name)
-                    acc_val = float(acc_ok) if acc_ok else -1.0
-                    freq_rank = freq_rank_map.get(fft_freq, 0) if fft_freq is not None else 0
-                    success_candidates.append((win_n, fft_freq, th, dec_th, th_rows, acc_val, freq_rank))
-                    if win_n is not None:
-                        n_label = f"n={win_n} "
-                    elif fft_freq is not None:
-                        n_label = f"freq={fft_freq:.3f}Hz "
-                    else:
-                        n_label = ""
-                    print(
-                        f"[OK] {folder_name}: success at {n_label}threshold={th} "
-                        f"(pixel_acc_ok={acc_ok or 'n/a'})"
+                    log_info(
+                        f"[OK] {folder_name}: decode success at {n_label}threshold={th} "
+                        f"(pixel_acc_all={acc_all_str or 'n/a'}, pixel_acc_ok={acc_ok_str or 'n/a'})"
+                    )
+                else:
+                    log_info(
+                        f"[INFO] {folder_name}: no decode at {n_label}threshold={th} "
+                        f"(pixel_acc_all={acc_all_str or 'n/a'})"
                     )
 
-            if success_candidates:
-                # 成功のうち pixel_acc_ok 最大 → 小さい th → 第一候補周波数優先
-                success_candidates.sort(key=lambda x: (-x[5], x[2], x[6], x[0] if x[0] is not None else 0))
-                best_window_n, best_fft_freq, best_th, best_dec, best_rows, _, _ = success_candidates[0]
+            if sweep_candidates:
+                # pixel_acc_all 最大 → デコード成功優先 → 小さい th → 小さい n → 第一候補周波数
+                def _candidate_sort_key(
+                    item: Tuple[
+                        Optional[int],
+                        Optional[float],
+                        int,
+                        Dict[str, str],
+                        List[Dict[str, str]],
+                        float,
+                        bool,
+                        int,
+                    ],
+                ) -> Tuple[int, float, int, int, int, int]:
+                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank = item
+                    has_acc = acc != float("-inf")
+                    return (
+                        0 if has_acc else 1,
+                        -acc if has_acc else 0.0,
+                        0 if ok else 1,
+                        th,
+                        win_n if win_n is not None else 0,
+                        freq_rank,
+                    )
+
+                sweep_candidates.sort(key=_candidate_sort_key)
+                (
+                    best_window_n,
+                    best_fft_freq,
+                    best_th,
+                    best_dec,
+                    best_rows,
+                    best_acc_all,
+                    best_ok,
+                    _,
+                ) = sweep_candidates[0]
                 if best_window_n is not None:
                     n_label = f"n={best_window_n} "
                 elif best_fft_freq is not None:
                     n_label = f"freq={best_fft_freq:.3f}Hz "
                 else:
                     n_label = ""
-                print(f"[OK] {folder_name}: selected {n_label}threshold={best_th}")
-            elif folder_decode_rows:
-                last = folder_decode_rows[-1]
-                best_th = int(last.get("diff_threshold") or diff_thresholds[-1])
-                win_raw = str(last.get("window_n") or "").strip()
-                best_window_n = int(win_raw) if win_raw else None
-                fft_raw = str(last.get("fft_target_hz") or "").strip()
-                best_fft_freq = float(fft_raw) if fft_raw else None
-                best_rows = [
-                    r
-                    for r in folder_decode_rows
-                    if r.get("diff_threshold") == str(best_th)
-                    and r.get("window_n", "") == ("" if best_window_n is None else str(best_window_n))
-                    and r.get("fft_target_hz", "") == ("" if best_fft_freq is None else f"{best_fft_freq:.6f}")
-                ]
-                best_dec = pick_decode_row_for_folder(
-                    [
-                        {
-                            k: v
-                            for k, v in r.items()
-                            if k
-                            not in (
-                                "diff_threshold",
-                                "diff_mode",
-                                "window_n",
-                                "stat_kind",
-                                "fft_target_hz",
-                            )
-                        }
-                        for r in best_rows
-                    ],
-                    folder_name,
+                acc_txt = f"{best_acc_all:.6f}" if best_acc_all != float("-inf") else "n/a"
+                log_info(
+                    f"[OK] {folder_name}: selected {n_label}threshold={best_th} "
+                    f"(pixel_acc_all={acc_txt}, decode={'OK' if best_ok else 'NG'})"
                 )
             else:
                 decode_note = "diff/decode失敗: 全threshold"
-                print(f"[WARN] {folder_name}: {decode_note}")
+                log_warn(f"[WARN] {folder_name}: {decode_note}")
 
             all_decode_rows = [r for r in all_decode_rows if r.get("folder") != folder_name]
             all_decode_rows.extend(folder_decode_rows)
@@ -1279,14 +1340,14 @@ def main() -> None:
         keep_frames = int(ns.max_frames)
         if ns.reuse_frames and keep_frames < ANALYSIS_FRAME_COUNT:
             # 次モード（pair→accum 等）で再利用できるよう解析フレームを残す
-            print(
+            log_info(
                 f"[INFO] ({i+1}/{len(conditions)}) reuse-frames: "
                 f"keep {ANALYSIS_FRAME_COUNT} frames "
                 f"(--max-frames {keep_frames} の間引きはスキップ)"
             )
             keep_frames = ANALYSIS_FRAME_COUNT
         kept = prune_saved_frames(cond_dir, keep_frames=keep_frames)
-        print(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
+        log_info(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
 
         dec = best_dec
         pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(best_rows, folder_name)
@@ -1369,20 +1430,23 @@ def main() -> None:
 
         write_results_csv(results_csv, results)
         pair_note = f", {pair_accuracy_csv.name} ({len(all_pair_accuracy_rows)} rows)" if diff_mode == "pair" else ""
-        print(
+        log_info(
             f"[OK] ({i+1}/{len(conditions)}) wrote {results_csv.name} ({len(results)} rows), "
             f"{decode_csv.name} ({len(all_decode_rows)} decode rows){pair_note}"
         )
 
-    print(f"[OK] results: {results_csv}")
-    print(f"[OK] decode: {decode_csv}")
-    if diff_mode == "pair":
-        print(f"[OK] pair accuracy: {pair_accuracy_csv}")
-    print(
-        f"[INFO] extract summary: reused={reused_conditions} "
-        f"extracted={extracted_conditions} "
-        f"(reuse_frames={ns.reuse_frames})"
-    )
+    if _QUIET:
+        print(f"result: OK ({results_csv})")
+    else:
+        log_info(f"[OK] results: {results_csv}")
+        log_info(f"[OK] decode: {decode_csv}")
+        if diff_mode == "pair":
+            log_info(f"[OK] pair accuracy: {pair_accuracy_csv}")
+        log_info(
+            f"[INFO] extract summary: reused={reused_conditions} "
+            f"extracted={extracted_conditions} "
+            f"(reuse_frames={ns.reuse_frames})"
+        )
 
 
 if __name__ == "__main__":
