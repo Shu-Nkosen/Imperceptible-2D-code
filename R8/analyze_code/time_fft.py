@@ -89,6 +89,36 @@ def build_score_map(
     )
 
 
+def lockin_score_map(
+    d_stack: np.ndarray,
+    fps: float,
+    target_freq: float,
+    phase_steps: int = 8,
+) -> np.ndarray:
+    """pair-diff 系列 d(t) に対する複素ロックイン振幅 → (H,W)。"""
+    if d_stack.ndim != 3:
+        raise ValueError(f"d_stack must be (T,H,W), got {d_stack.shape}")
+    t_len = d_stack.shape[0]
+    if t_len < 2 or fps <= 0:
+        return np.zeros(d_stack.shape[1:], dtype=np.float32)
+
+    steps = max(1, int(phase_steps))
+    t = np.arange(t_len, dtype=np.float32) / float(fps)
+    omega = 2.0 * np.pi * float(target_freq)
+    best = np.zeros(d_stack.shape[1:], dtype=np.float32)
+
+    for k in range(steps):
+        phi = 2.0 * np.pi * k / steps
+        ref_cos = np.cos(omega * t + phi).astype(np.float32)[:, None, None]
+        ref_sin = np.sin(omega * t + phi).astype(np.float32)[:, None, None]
+        in_phase = (d_stack * ref_cos).sum(axis=0)
+        quadrature = (d_stack * ref_sin).sum(axis=0)
+        amp = np.sqrt(in_phase * in_phase + quadrature * quadrature)
+        best = np.maximum(best, amp)
+
+    return best.astype(np.float32)
+
+
 def normalize_score_map(score_map: np.ndarray) -> np.ndarray:
     min_value = float(np.min(score_map))
     max_value = float(np.max(score_map))

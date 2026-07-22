@@ -499,15 +499,20 @@ def search_mode_params(mode: str) -> Tuple[Tuple[str, ...], Tuple[float, ...], s
     return FAST_VARIANT_ORDER, FAST_SCALES, "best_once"
 
 
-def decode_qr_from_diff(
-    diff_path: Path,
+def decode_qr_from_rgb_array(
+    rgb: np.ndarray,
     median_kernel: int,
     median_iterations: int,
     search_mode: str,
 ) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
-    gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
-    if gray is None:
-        return None, "画像読み込み失敗", None
+    if rgb is None or rgb.size == 0:
+        return None, "画像データなし", None
+    if rgb.ndim == 3 and rgb.shape[2] >= 3:
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    elif rgb.ndim == 2:
+        gray = rgb
+    else:
+        return None, "画像形式不正", None
 
     median_gray = apply_median_filter(gray, median_kernel, median_iterations)
     detector = cv2.QRCodeDetector()
@@ -535,6 +540,40 @@ def decode_qr_from_diff(
                 target,
             )
 
+    return None, "decode失敗", last_target
+
+
+def decode_qr_from_diff(
+    diff_path: Path,
+    median_kernel: int,
+    median_iterations: int,
+    search_mode: str,
+) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
+    gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
+    if gray is None:
+        return None, "画像読み込み失敗", None
+    rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    return decode_qr_from_rgb_array(rgb, median_kernel, median_iterations, search_mode)
+
+
+def decode_qr_with_kernel_candidates_from_array(
+    rgb: np.ndarray,
+    kernel_candidates: List[int],
+    median_iterations: int,
+    search_mode: str,
+) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
+    last_target: Optional[np.ndarray] = None
+    for kernel in kernel_candidates:
+        text, method, used_img = decode_qr_from_rgb_array(
+            rgb,
+            kernel,
+            median_iterations,
+            search_mode,
+        )
+        if used_img is not None:
+            last_target = used_img
+        if text:
+            return text, method, used_img
     return None, "decode失敗", last_target
 
 
@@ -587,6 +626,59 @@ def read_target_folders(base_dir: Path, input_csv: Path) -> List[Path]:
         [path for path in base_dir.iterdir() if path.is_dir() and (path / DIFF_SUBDIR).exists()],
         key=lambda p: p.name,
     )
+
+
+def process_array_task(task: Dict[str, object]) -> Dict[str, object]:
+    rgb = task["rgb"]
+    if not isinstance(rgb, np.ndarray):
+        rgb = np.asarray(rgb)
+    kernel_candidates = [int(value) for value in task["kernel_candidates"]]
+    median_iterations = int(task["median_iterations"])
+    search_mode = str(task.get("search_mode") or "fast")
+    gt_path_str = str(task.get("gt_path") or "")
+
+    decoded_text, method, used_img = decode_qr_with_kernel_candidates_from_array(
+        rgb,
+        kernel_candidates,
+        median_iterations,
+        search_mode,
+    )
+    ok = decoded_text is not None
+
+    used_img_bytes = None
+    if ok and used_img is not None:
+        ok_encode, encoded = cv2.imencode(".png", used_img)
+        if ok_encode:
+            used_img_bytes = encoded.tobytes()
+
+    if used_img is not None:
+        img_for_gt = used_img
+    elif rgb.ndim == 3:
+        img_for_gt = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    else:
+        img_for_gt = rgb
+    recall, precision, accuracy, noise, gt_note = compare_with_gt(img_for_gt, gt_path_str)
+
+    diff_stem = str(task.get("diff_stem") or "in_memory")
+    return {
+        "folder": str(task["folder"]),
+        "frame_1": str(task["frame_1"]),
+        "frame_2": str(task["frame_2"]),
+        "diff_image": str(task.get("diff_image") or ""),
+        "decoded_text": decoded_text or "",
+        "success": ok,
+        "method": method,
+        "note": "" if ok else "QR未検出",
+        "recall": recall,
+        "precision": precision,
+        "accuracy": accuracy,
+        "noise": noise,
+        "gt_note": gt_note,
+        "used_img_bytes": used_img_bytes,
+        "method_tag": sanitize_filename(method if method else "unknown"),
+        "diff_stem": diff_stem,
+        "task_key": str(task.get("task_key") or ""),
+    }
 
 
 def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
