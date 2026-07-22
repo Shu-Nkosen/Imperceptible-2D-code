@@ -1094,9 +1094,18 @@ def main() -> None:
         best_fft_freq: Optional[float] = None
         best_rows: List[Dict[str, str]] = []
         folder_decode_rows: List[Dict[str, str]] = []
-        # (window_n, fft_freq, th, decode_row, rows, pixel_acc_ok, freq_rank)
-        success_candidates: List[
-            Tuple[Optional[int], Optional[float], int, Dict[str, str], List[Dict[str, str]], float, int]
+        # (window_n, fft_freq, th, decode_row, rows, pixel_acc_all, decode_ok, freq_rank)
+        sweep_candidates: List[
+            Tuple[
+                Optional[int],
+                Optional[float],
+                int,
+                Dict[str, str],
+                List[Dict[str, str]],
+                float,
+                bool,
+                int,
+            ]
         ] = []
         freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
 
@@ -1247,64 +1256,78 @@ def main() -> None:
 
                 dec_th = pick_decode_row_for_folder(th_rows, folder_name)
                 ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
+                acc_all_str, acc_ok_str = pixel_accuracy_for_folder(th_rows, folder_name)
+                if acc_all_str:
+                    acc_all_val = float(acc_all_str)
+                else:
+                    acc_all_val = float("-inf")
+                freq_rank = freq_rank_map.get(fft_freq, 0) if fft_freq is not None else 0
+                sweep_candidates.append(
+                    (win_n, fft_freq, th, dec_th, tagged_rows, acc_all_val, ok, freq_rank)
+                )
+                if win_n is not None:
+                    n_label = f"n={win_n} "
+                elif fft_freq is not None:
+                    n_label = f"freq={fft_freq:.3f}Hz "
+                else:
+                    n_label = ""
                 if ok:
-                    _, acc_ok = pixel_accuracy_for_folder(th_rows, folder_name)
-                    acc_val = float(acc_ok) if acc_ok else -1.0
-                    freq_rank = freq_rank_map.get(fft_freq, 0) if fft_freq is not None else 0
-                    success_candidates.append((win_n, fft_freq, th, dec_th, th_rows, acc_val, freq_rank))
-                    if win_n is not None:
-                        n_label = f"n={win_n} "
-                    elif fft_freq is not None:
-                        n_label = f"freq={fft_freq:.3f}Hz "
-                    else:
-                        n_label = ""
                     log_info(
-                        f"[OK] {folder_name}: success at {n_label}threshold={th} "
-                        f"(pixel_acc_ok={acc_ok or 'n/a'})"
+                        f"[OK] {folder_name}: decode success at {n_label}threshold={th} "
+                        f"(pixel_acc_all={acc_all_str or 'n/a'}, pixel_acc_ok={acc_ok_str or 'n/a'})"
+                    )
+                else:
+                    log_info(
+                        f"[INFO] {folder_name}: no decode at {n_label}threshold={th} "
+                        f"(pixel_acc_all={acc_all_str or 'n/a'})"
                     )
 
-            if success_candidates:
-                # 成功のうち pixel_acc_ok 最大 → 小さい th → 第一候補周波数優先
-                success_candidates.sort(key=lambda x: (-x[5], x[2], x[6], x[0] if x[0] is not None else 0))
-                best_window_n, best_fft_freq, best_th, best_dec, best_rows, _, _ = success_candidates[0]
+            if sweep_candidates:
+                # pixel_acc_all 最大 → デコード成功優先 → 小さい th → 小さい n → 第一候補周波数
+                def _candidate_sort_key(
+                    item: Tuple[
+                        Optional[int],
+                        Optional[float],
+                        int,
+                        Dict[str, str],
+                        List[Dict[str, str]],
+                        float,
+                        bool,
+                        int,
+                    ],
+                ) -> Tuple[int, float, int, int, int, int]:
+                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank = item
+                    has_acc = acc != float("-inf")
+                    return (
+                        0 if has_acc else 1,
+                        -acc if has_acc else 0.0,
+                        0 if ok else 1,
+                        th,
+                        win_n if win_n is not None else 0,
+                        freq_rank,
+                    )
+
+                sweep_candidates.sort(key=_candidate_sort_key)
+                (
+                    best_window_n,
+                    best_fft_freq,
+                    best_th,
+                    best_dec,
+                    best_rows,
+                    best_acc_all,
+                    best_ok,
+                    _,
+                ) = sweep_candidates[0]
                 if best_window_n is not None:
                     n_label = f"n={best_window_n} "
                 elif best_fft_freq is not None:
                     n_label = f"freq={best_fft_freq:.3f}Hz "
                 else:
                     n_label = ""
-                log_info(f"[OK] {folder_name}: selected {n_label}threshold={best_th}")
-            elif folder_decode_rows:
-                last = folder_decode_rows[-1]
-                best_th = int(last.get("diff_threshold") or diff_thresholds[-1])
-                win_raw = str(last.get("window_n") or "").strip()
-                best_window_n = int(win_raw) if win_raw else None
-                fft_raw = str(last.get("fft_target_hz") or "").strip()
-                best_fft_freq = float(fft_raw) if fft_raw else None
-                best_rows = [
-                    r
-                    for r in folder_decode_rows
-                    if r.get("diff_threshold") == str(best_th)
-                    and r.get("window_n", "") == ("" if best_window_n is None else str(best_window_n))
-                    and r.get("fft_target_hz", "") == ("" if best_fft_freq is None else f"{best_fft_freq:.6f}")
-                ]
-                best_dec = pick_decode_row_for_folder(
-                    [
-                        {
-                            k: v
-                            for k, v in r.items()
-                            if k
-                            not in (
-                                "diff_threshold",
-                                "diff_mode",
-                                "window_n",
-                                "stat_kind",
-                                "fft_target_hz",
-                            )
-                        }
-                        for r in best_rows
-                    ],
-                    folder_name,
+                acc_txt = f"{best_acc_all:.6f}" if best_acc_all != float("-inf") else "n/a"
+                log_info(
+                    f"[OK] {folder_name}: selected {n_label}threshold={best_th} "
+                    f"(pixel_acc_all={acc_txt}, decode={'OK' if best_ok else 'NG'})"
                 )
             else:
                 decode_note = "diff/decode失敗: 全threshold"
