@@ -1,0 +1,2 @@
+﻿folder,frame_1,frame_2,diff_image,analysis_image,decoded_text,success,method,note,recall,precision,accuracy,noise,gt_note
+rice_R_4,frame_00000.png,frame_00116.png,rice_R_4\rgb_max_stat_std_th8\00000-00116-FRAME_rgbmax_scale1.00.png,,,0,decode失敗,QR未検出,0.177489,0.359409,0.585554,0.141406,
