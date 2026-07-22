@@ -5,7 +5,9 @@ import csv
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -25,6 +27,7 @@ ALL_ANALYSIS_PASSES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
 )
 
 SUMMARY_FIELDS = ("video", "pass", "manifest", "status", "exit_code", "note")
+TIMING_FIELDS = ("finished_at", "video", "pass", "status", "elapsed_sec", "note")
 
 
 @dataclass(frozen=True)
@@ -263,13 +266,14 @@ def run_one_pass(
     shared_extra: Sequence[str],
     pass_label: str,
     pass_args: Sequence[str],
-) -> Tuple[RunResult, str]:
-    """戻り値: (RunResult, captured_output)。失敗時の末尾表示用に出力を返す。"""
+) -> Tuple[RunResult, str, float]:
+    """戻り値: (RunResult, captured_output, elapsed_sec)。"""
     args = build_pipeline_args(
         video_path, manifest_path, out_dir, mid_search, shared_extra, pass_args
     )
     cmd = [sys.executable, str(pipeline_script), *args]
     captured = ""
+    t0 = time.perf_counter()
     try:
         completed = subprocess.run(
             cmd,
@@ -286,6 +290,7 @@ def run_one_pass(
         )
         out_root = resolve_out_root(video_path, out_dir, default_out)
         archive_pass_outputs(out_root, pass_label)
+        elapsed = time.perf_counter() - t0
         if exit_code == 0:
             return (
                 RunResult(
@@ -297,6 +302,7 @@ def run_one_pass(
                     note="",
                 ),
                 captured,
+                elapsed,
             )
         return (
             RunResult(
@@ -308,8 +314,10 @@ def run_one_pass(
                 note=f"run_pipeline exit={exit_code}",
             ),
             captured,
+            elapsed,
         )
     except Exception as exc:
+        elapsed = time.perf_counter() - t0
         return (
             RunResult(
                 video=video_path,
@@ -320,6 +328,7 @@ def run_one_pass(
                 note=str(exc),
             ),
             captured,
+            elapsed,
         )
 
 
@@ -330,17 +339,47 @@ def print_job_lines(
     pass_label: str,
     result: RunResult,
     captured: str = "",
+    elapsed_sec: float = 0.0,
 ) -> None:
     prefix = f"[{job_i}/{total_jobs}]"
+    elapsed_txt = f"{elapsed_sec:.0f}s"
     print(f"{prefix} target: {video_name}")
     print(f"{prefix} pass:   {pass_label}")
     if result.status == "OK":
-        print(f"{prefix} result: OK")
+        print(f"{prefix} result: OK ({elapsed_txt})")
         return
     note = result.note.strip() or "FAIL"
-    print(f"{prefix} result: FAIL ({note})")
+    print(f"{prefix} result: FAIL ({note}, {elapsed_txt})")
     for line in _tail_lines(captured, 20):
         print(f"         {line}")
+
+
+def append_timing_row(
+    path: Path,
+    *,
+    video: str,
+    pass_label: str,
+    status: str,
+    elapsed_sec: float,
+    note: str = "",
+) -> None:
+    """out 直下の timing CSV に1行追記（既存データは消さない）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_header = not path.exists() or path.stat().st_size == 0
+    with path.open("a", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(TIMING_FIELDS))
+        if write_header:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "finished_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "video": video,
+                "pass": pass_label,
+                "status": status,
+                "elapsed_sec": f"{elapsed_sec:.1f}",
+                "note": note,
+            }
+        )
 
 
 def write_summary(path: Path, results: List[RunResult]) -> None:
@@ -370,6 +409,7 @@ def main() -> int:
         Path(ns.manifest_dir).resolve() if ns.manifest_dir else default_manifest.resolve()
     )
     summary_path = default_out / "all_analyze_summary.csv"
+    timing_path = default_out / "all_analyze_timing.csv"
     pipeline_script = Path(__file__).resolve().parent / "run_pipeline.py"
     cwd = Path(__file__).resolve().parent
 
@@ -412,12 +452,20 @@ def main() -> int:
                     note=note,
                 )
                 results.append(fail)
+                append_timing_row(
+                    timing_path,
+                    video=video_path.name,
+                    pass_label=pass_label,
+                    status="FAIL",
+                    elapsed_sec=0.0,
+                    note=note,
+                )
                 print_job_lines(job_i, total_jobs, video_path.name, pass_label, fail)
             continue
 
         for pass_label, pass_args in passes:
             job_i += 1
-            result, captured = run_one_pass(
+            result, captured, elapsed = run_one_pass(
                 pipeline_script,
                 cwd,
                 video_path,
@@ -430,8 +478,22 @@ def main() -> int:
                 pass_args,
             )
             results.append(result)
+            append_timing_row(
+                timing_path,
+                video=video_path.name,
+                pass_label=pass_label,
+                status=result.status,
+                elapsed_sec=elapsed,
+                note=result.note,
+            )
             print_job_lines(
-                job_i, total_jobs, video_path.name, pass_label, result, captured
+                job_i,
+                total_jobs,
+                video_path.name,
+                pass_label,
+                result,
+                captured,
+                elapsed_sec=elapsed,
             )
 
     write_summary(summary_path, results)
@@ -439,7 +501,7 @@ def main() -> int:
     fail_count = len(results) - ok_count
     print(
         f"[INFO] finished: ok={ok_count} fail={fail_count} "
-        f"summary={summary_path.resolve()}"
+        f"summary={summary_path.resolve()} timing={timing_path.resolve()}"
     )
     return 0 if fail_count == 0 else 1
 

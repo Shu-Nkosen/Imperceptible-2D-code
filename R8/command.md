@@ -520,4 +520,5 @@ python R8/analyze_code/all_analyze.py --mid-search
 python R8/analyze_code/all_analyze.py --force-extract
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）
+サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）  
+所要時間: `R8/analyze_code/out/all_analyze_timing.csv`（追記蓄積。`finished_at`, `video`, `pass`, `status`, `elapsed_sec`）

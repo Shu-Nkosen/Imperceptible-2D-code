@@ -262,6 +262,7 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `qr_decode_all_frames.csv` | 同上 | **差分1枚（ペア/窓）** ごとのデコード詳細（全閾値スイープ含む） |
 | `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別アーカイブ |
 | `all_analyze_summary.csv` | `out/` | **動画×手法** ごとの成否サマリー |
+| `all_analyze_timing.csv` | `out/` | **動画×手法** ごとの所要時間（追記・蓄積） |
 
 1回の `run_pipeline` は **1つの `diff_mode` のみ**。モード比較は `results_pair.csv` と `results_fourier.csv` などを並べて見ます。
 
@@ -369,6 +370,19 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `exit_code` | `run_pipeline` の終了コード（0 = 成功） |
 | `note` | 失敗理由（manifest 不在、`run_pipeline exit=1` 等） |
 
+### `all_analyze_timing.csv`（所要時間・追記蓄積）
+
+`out/all_analyze_timing.csv`。実行のたびに**追記**し、過去行は残します。
+
+| 列 | 説明 |
+|----|------|
+| `finished_at` | ジョブ完了時刻（`YYYY-MM-DD HH:MM:SS`） |
+| `video` | 動画ファイル名 |
+| `pass` | 解析手法 |
+| `status` | `OK` / `FAIL` |
+| `elapsed_sec` | 所要秒（小数1桁） |
+| `note` | 失敗理由（成功時は空） |
+
 ---
 
 ## 一括解析（全動画）
@@ -407,5 +421,6 @@ python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
 python R8/analyze_code/all_analyze.py --force-extract
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）
+サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）  
+所要時間: `R8/analyze_code/out/all_analyze_timing.csv`（追記蓄積。`finished_at`, `video`, `pass`, `status`, `elapsed_sec`, `note`）
 
