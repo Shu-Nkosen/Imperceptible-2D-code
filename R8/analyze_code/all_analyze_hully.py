@@ -244,10 +244,17 @@ def main() -> int:
             elapsed_sec=result.elapsed_sec,
             note=result.note,
         )
-        print(
-            f"[{idx}/{len(videos)}] {video_path.name}: {result.status} "
-            f"({result.elapsed_sec:.0f}s)"
-        )
+        if result.status == "OK":
+            print(
+                f"[{idx}/{len(videos)}] {video_path.name}: OK "
+                f"({result.elapsed_sec:.0f}s)"
+            )
+        else:
+            note = result.note.strip() or "unknown error"
+            print(
+                f"[{idx}/{len(videos)}] {video_path.name}: FAIL "
+                f"({result.elapsed_sec:.0f}s) {note}"
+            )
 
     write_summary(summary_path, results)
     ok_count = sum(1 for r in results if r.status == "OK")

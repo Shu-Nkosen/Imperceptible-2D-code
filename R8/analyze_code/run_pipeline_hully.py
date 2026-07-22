@@ -8,6 +8,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+import cv2
 import numpy as np
 
 from decode_qr_from_all_frames import (
