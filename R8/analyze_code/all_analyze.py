@@ -8,8 +8,16 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
+import torch
 
 from naming import VideoNameMeta, parse_video_name
+
+# 1. GPUが使えるなら 'cuda'、使えないなら 'cpu' を自動選択
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"現在のデバイス: {device}")
+
+# 2. データ（テンソル）を作ったら、.to(device) でGPUに送る
+x = torch.randn(3, 3).to(device)
 
 ALLOWED_RATES = {45, 60, 90, 120, 180}
 ALLOWED_EXPS = {250, 125, 60}
