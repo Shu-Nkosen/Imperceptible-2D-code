@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 
-PASSES = ("pair", "accum", "stat_std", "stat_var", "fourier")
+PASSES = ("pair", "accum", "stat_std", "stat_var", "lockin", "fourier")
 
 
 def load_results(path: Path) -> List[Dict[str, str]]:

@@ -209,19 +209,58 @@ def generate_stat_maps(
     ]
 
 
-def generate_fourier_maps(
+def generate_lockin_maps(
     d_stack: np.ndarray,
     fps: float,
     target_freq: float,
     threshold: int,
     phase_steps: int = 8,
 ) -> List[MapSpec]:
+    """d(t) への複素ロックイン振幅マップ。"""
     from time_fft import format_freq_label, normalize_score_map
 
     th = float(threshold) / 255.0
     freq_label = format_freq_label(target_freq)
-    subdir = f"rgb_max_fourier_{freq_label}_th{threshold}"
+    subdir = f"rgb_max_lockin_{freq_label}_th{threshold}"
     score = lockin_map_from_diff(d_stack, fps, target_freq, phase_steps=phase_steps)
+    norm = normalize_score_map(score)
+    inc, dec, unch = classify_scalar_map(norm, th)
+    rgb = _diff_to_rgb(inc, dec, unch)
+    n = d_stack.shape[0]
+    return [
+        MapSpec(
+            rgb=rgb,
+            diff_mode="lockin",
+            diff_threshold=threshold,
+            fft_target_hz=target_freq,
+            frame_1=frame_name(0),
+            frame_2=frame_name(n),
+            diff_subdir=subdir,
+            pair_name=build_pair_name(0, n),
+        )
+    ]
+
+
+def generate_fourier_maps(
+    d_stack: np.ndarray,
+    fps: float,
+    target_freq: float,
+    threshold: int,
+    band_radius: int = 1,
+) -> List[MapSpec]:
+    """d(t) への帯付き FFT スコアマップ（target 近傍 / noise floor）。"""
+    from time_fft import build_score_map, format_freq_label, normalize_score_map
+
+    th = float(threshold) / 255.0
+    freq_label = format_freq_label(target_freq)
+    subdir = f"rgb_max_fourier_{freq_label}_th{threshold}"
+    score = build_score_map(
+        d_stack,
+        fps=fps,
+        target_freq=target_freq,
+        band_radius=band_radius,
+        use_window=True,
+    )
     norm = normalize_score_map(score)
     inc, dec, unch = classify_scalar_map(norm, th)
     rgb = _diff_to_rgb(inc, dec, unch)

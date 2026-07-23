@@ -57,8 +57,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         choices=[1, 2, 120],
         default=120,
-        help="解析後に残す frame_*.png の枚数（1/2/120）。差分計算は常に120フレーム分。既定: 120。"
-        " 1=中間1枚、2=先頭+末尾2枚、120=全部",
+        help="互換用（間引きはしない）。解析用 frame_*.png は常に120枚を書き・残す。"
+        " 再切り出し時のみ古い frame_*.png を消してから書き直す。",
     )
     p.add_argument("--manifest", type=str, default="", help="optional presenter manifest.json for metadata join")
     p.add_argument(
@@ -339,40 +339,6 @@ def save_block_frames(
     return saved
 
 
-def prune_saved_frames(out_dir: Path, keep_frames: int) -> int:
-    """解析後に残す frame_*.png を keep_frames 枚に間引く。"""
-    paths = sorted(out_dir.glob("frame_?????.png"))
-    if not paths:
-        return 0
-    keep = min(int(keep_frames), len(paths))
-    if keep >= len(paths):
-        return len(paths)
-
-    if keep == 1:
-        keep_set = {paths[len(paths) // 2]}
-    else:
-        idxs = [
-            int(round(i * (len(paths) - 1) / (keep - 1)))
-            for i in range(keep)
-        ]
-        keep_set = {paths[i] for i in idxs}
-
-    for path in paths:
-        if path not in keep_set:
-            path.unlink(missing_ok=True)
-
-    # 残したファイルを frame_00000... にリネームし直す
-    kept = sorted(keep_set, key=lambda p: p.name)
-    tmp_paths: List[Path] = []
-    for i, path in enumerate(kept):
-        tmp = out_dir / f"_keep_{i:05d}.png"
-        path.rename(tmp)
-        tmp_paths.append(tmp)
-    for i, tmp in enumerate(tmp_paths):
-        tmp.rename(out_dir / f"frame_{i:05d}.png")
-    return len(tmp_paths)
-
-
 def pick_decode_row_for_folder(rows: List[Dict[str, str]], folder: str) -> Dict[str, str]:
     matches = [r for r in rows if r.get("folder") == folder]
     if not matches:
@@ -477,101 +443,6 @@ def select_first_last_pair_rows(
         seen.add(key)
         out.append(row)
     return out
-
-
-def _parse_diff_pair_from_name(path: Path) -> Optional[Tuple[int, int]]:
-    match = re.match(r"(\d+)-(\d+)-", path.stem)
-    if not match:
-        return None
-    return int(match.group(1)), int(match.group(2))
-
-
-def _parse_pair_key_from_row(row: Dict[str, str]) -> Optional[Tuple[int, int]]:
-    try:
-        left = int(str(row.get("frame_1") or "").strip())
-        right = int(str(row.get("frame_2") or "").strip())
-    except ValueError:
-        return None
-    return tuple(sorted((left, right)))
-
-
-def select_keep_diff_images(
-    rows_for_folder: List[Dict[str, str]],
-    diff_dir: Path,
-    stride: int = 10,
-) -> Tuple[set[Path], Dict[str, int]]:
-    paths = sorted(
-        [p for p in diff_dir.glob("*_rgbmax_scale*.png") if _parse_diff_pair_from_name(p) is not None],
-        key=lambda p: _parse_diff_pair_from_name(p) or (10**9, 10**9),
-    )
-    if not paths:
-        return set(), {"success": 0, "best_acc": 0, "stride": 0}
-
-    keep_set: set[Path] = set()
-    pair_to_path: Dict[Tuple[int, int], Path] = {}
-    for path in paths:
-        pair = _parse_diff_pair_from_name(path)
-        if pair is not None:
-            pair_to_path[pair] = path
-
-    success_count = 0
-    for row in rows_for_folder:
-        ok = str(row.get("success", "")).strip() in ("1", "True", "true")
-        if not ok:
-            continue
-        pair = _parse_pair_key_from_row(row)
-        if pair is None:
-            continue
-        target = pair_to_path.get(pair)
-        if target is not None:
-            keep_set.add(target)
-            success_count += 1
-
-    best_acc_path: Optional[Path] = None
-    best_acc: Optional[float] = None
-    for row in rows_for_folder:
-        acc = _parse_accuracy(row.get("accuracy"))
-        if acc is None:
-            continue
-        pair = _parse_pair_key_from_row(row)
-        if pair is None:
-            continue
-        target = pair_to_path.get(pair)
-        if target is None:
-            continue
-        if best_acc is None or acc > best_acc:
-            best_acc = acc
-            best_acc_path = target
-    if best_acc_path is not None:
-        keep_set.add(best_acc_path)
-
-    stride_count = 0
-    stride = max(1, int(stride))
-    for idx, path in enumerate(paths):
-        if idx % stride == 0:
-            keep_set.add(path)
-            stride_count += 1
-
-    return keep_set, {
-        "success": success_count,
-        "best_acc": 1 if best_acc_path is not None else 0,
-        "stride": stride_count,
-    }
-
-
-def prune_diff_images(diff_dir: Path, keep_set: set[Path]) -> Tuple[int, int]:
-    paths = sorted(diff_dir.glob("*_rgbmax_scale*.png"))
-    if not paths:
-        return 0, 0
-    removed = 0
-    kept = 0
-    for path in paths:
-        if path in keep_set:
-            kept += 1
-            continue
-        path.unlink(missing_ok=True)
-        removed += 1
-    return kept, removed
 
 
 def format_common_meta(
@@ -1035,7 +906,7 @@ def main() -> None:
         print(f"mode:   {'/'.join(mode_bits)}")
     else:
         log_info(
-            f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} / keep_frames={ns.max_frames} "
+            f"[INFO] analysis_frames={ANALYSIS_FRAME_COUNT} "
             f"/ diff_mode={diff_mode} "
             f"/ stat_kind={(stat_kind if stat_kind else '-')} "
             f"/ target_freqs={([f'{f:.3f}' for f in target_freqs] if target_freqs else '-')} "
@@ -1244,16 +1115,6 @@ def main() -> None:
                     tagged_rows.append(row_th)
                 folder_decode_rows.extend(tagged_rows)
 
-                if diff_mode == "pair":
-                    diff_dir = cond_dir / diff_subdir
-                    keep_set, keep_stats = select_keep_diff_images(th_rows, diff_dir, stride=10)
-                    kept, removed = prune_diff_images(diff_dir, keep_set)
-                    log_info(
-                        f"[INFO] {folder_name}: pair prune kept={kept} removed={removed} "
-                        f"(success={keep_stats['success']}, best_acc={keep_stats['best_acc']}, "
-                        f"stride={keep_stats['stride']})"
-                    )
-
                 dec_th = pick_decode_row_for_folder(th_rows, folder_name)
                 ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
                 acc_all_str, acc_ok_str = pixel_accuracy_for_folder(th_rows, folder_name)
@@ -1337,16 +1198,8 @@ def main() -> None:
             all_decode_rows.extend(folder_decode_rows)
             write_csv(decode_csv, all_decode_rows)
 
-        keep_frames = int(ns.max_frames)
-        if ns.reuse_frames and keep_frames < ANALYSIS_FRAME_COUNT:
-            # 次モード（pair→accum 等）で再利用できるよう解析フレームを残す
-            log_info(
-                f"[INFO] ({i+1}/{len(conditions)}) reuse-frames: "
-                f"keep {ANALYSIS_FRAME_COUNT} frames "
-                f"(--max-frames {keep_frames} の間引きはスキップ)"
-            )
-            keep_frames = ANALYSIS_FRAME_COUNT
-        kept = prune_saved_frames(cond_dir, keep_frames=keep_frames)
+        # 解析に使った frame_*.png は残す（書き出し後の間引きはしない）
+        kept = count_consecutive_analysis_frames(cond_dir)
         log_info(f"[INFO] ({i+1}/{len(conditions)}) keep frames={kept}")
 
         dec = best_dec

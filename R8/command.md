@@ -208,52 +208,31 @@ cd R8\make_movie
 
 ### 2.3 残すフレーム枚数
 
-| 保存パターン | `--max-frames` | 意味 |
-|---|---|---|
-| 全部残す（既定） | `120` | 再デコード・目視向け |
-| 先頭+末尾だけ残す | `2` | まずは端点だけ確認したい（差分計算は常に120枚分） |
-| 1枚だけ残す | `1` | ディスク節約（差分計算は常に120枚分） |
+解析用 `frame_*.png` は常に **120枚** を書き・残します（書き出し後の間引きはしません）。  
+`--max-frames` は互換用です。再切り出し時のみ古い `frame_*.png` を消してから書き直します。
 
 ---
 
 ### 2.4 pair（標準）
 
-`pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします。保存する差分PNGはさらに **成功ペア + 最高accuracyペア + 10枚に1枚** に間引かれます。
+`pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします。生成した差分PNGはそのまま残します。
 
-**パターン:** pair + fast + 120枚残す（いちばん標準）
+**パターン:** pair + fast（いちばん標準）
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
 ```
 
-**パターン:** pair + mid + 120枚残す
+**パターン:** pair + mid
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120 --mid-search
 ```
 
-**パターン:** pair + full + 120枚残す
+**パターン:** pair + full
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120 --full-search
-```
-
-**パターン:** pair + fast + 1枚だけ残す（本番一括・節約）
-
-```bash
-python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1
-```
-
-**パターン:** pair + mid + 1枚だけ残す
-
-```bash
-python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1 --mid-search
-```
-
-**パターン:** pair + fast + 先頭+末尾2枚だけ残す
-
-```bash
-python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 2
 ```
 
 **パターン:** pair の閾値スイープを上書き（例: 8 と 12 だけ）
@@ -466,10 +445,8 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 | 統計解析 | `--diff-mode stat`（`--stat-kind var` で分散） |
 | 時間軸FFT | `--diff-mode fourier`（`--target-freqs 15,7.5` で周波数上書き） |
 | accum を軽く | `--diff-mode accum --window-ns 4 --diff-thresholds 16,24,32` |
-| ディスク節約 | `--max-frames 1` |
-| 端点確認 | `--max-frames 2` |
 
-`pair` の差分PNGは既定で間引き保存されます。デコード対象も先頭20＋末尾20ペア（最大40）に限定されています。
+`pair` のデコード対象は先頭20＋末尾20ペア（最大40）に限定。生成した差分PNGはそのまま残します。
 
 出力先: `R8/analyze_code/out/<動画stem>/`  
 （`results.csv`, `qr_decode_all_frames.csv`, 条件フォルダ, `rgb_max_diff_maps_th*` / `rgb_max_accum_n*_th*`）
@@ -492,7 +469,7 @@ python R8/analyze_code/all_analyze.py
 4. `stat`（var）
 5. `fourier`
 
-共通: **fast** + `--max-frames 120` + `--workers 4` + **切り出し再利用**  
+共通: **fast** + `--workers 16` + **切り出し再利用**（frame は常に120枚残す）  
 動画順は rate → exp → fluoro。2手法目以降は切り出しを再利用します。  
 出力は手法別に `results_pair.csv` / `results_accum.csv` などとして残ります。  
 `--diff-mode ...` を付けた場合は、その手法だけ実行します。

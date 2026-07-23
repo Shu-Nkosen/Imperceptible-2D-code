@@ -114,10 +114,10 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 | `fourier` | 120フレーム時系列の時間軸FFT（max-channel）で特定周波数成分を抽出 | 第一候補+半分の2周波数 × th = **4 / 8 / 12** |
 
 デコード成否に関係なく、**`pixel_acc_all`（全ペア／窓の平均正解率）が最大**の組み合わせを `results.csv` に採用します（同点ならデコード成功優先 → 小さい th → 小さい n → 第一候補周波数）。失敗時も同じ基準で th / 窓長を書きます。
-`pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします（`--pair-each-end 20`）。保存する差分PNGはさらに **成功ペア + 最高accuracyペア + 10枚に1枚** に間引きます。
-`--max-frames` は解析後に残す `frame_*.png` 枚数だけを切り替えます。
+`pair` は **先頭20＋末尾20ペア（最大40）** だけ差分生成・デコードします（`--pair-each-end 20`）。生成した差分PNGはそのまま残します。
+解析用 `frame_*.png` は常に **120枚** を書き・残します（書き出し後の間引きはしません。再切り出し時のみ古い frame を消してから書き直し）。
 
-解析後に120枚残す（既定・pair・QR探索は fast）:
+解析（既定・pair・QR探索は fast）:
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
@@ -161,19 +161,13 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 python R8/analyze_code/run_pipeline.py --video R8/movie/r90_e250_f1.mp4 --manifest R8/make_movie/manifests/r90_e250.json --diff-mode fourier --target-freqs 15,7.5
 ```
 
-解析後に1枚だけ残す（ディスク節約。差分自体は120フレーム分）:
-
-```bash
-python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 1
-```
-
 QR探索を mid（拡大なしの中間探索）にする:
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --mid-search
 ```
 
-- `--max-frames`: `120`（既定）/ `2`（先頭+末尾2枚）/ `1`（残すPNG枚数）。差分計算は常に120フレーム分。`--reuse-frames`（既定）時は次モード再利用のため120枚を残す
+- `--max-frames`: 互換用（間引きしない）。frame は常に120枚を残す。`--reuse-frames`（既定）で切り出し再利用
 - `--reuse-frames` / `--force-extract`: 既存の条件フォルダ切り出しを再利用（既定）/ 毎回切り出し直す
 - `--diff-mode`: `pair`（既定）/ `accum` / `stat` / `fourier`
 - `--window-ns`: accum 時の窓長（カンマ区切り。未指定時 `3,5`）
@@ -405,7 +399,7 @@ python R8/analyze_code/all_analyze.py
 4. `stat`（var）
 5. `fourier`
 
-共通設定は **fast** + `--max-frames 120` + `--workers 4` + **切り出し再利用**。  
+共通設定は **fast** + `--max-frames 120`（互換・間引きなし）+ `--workers 16` + **切り出し再利用**。  
 手法ごとの結果は `results_<pass>.csv` / `qr_decode_all_frames_<pass>.csv` として残ります（例: `results_pair.csv`）。  
 `--diff-mode accum` など手法を明示した場合は、その手法だけ実行します。
 
@@ -418,10 +412,10 @@ python R8/analyze_code/all_analyze.py
 ```
 
 ```bash
-python R8/analyze_code/all_analyze.py --max-frames 2
+python R8/analyze_code/all_analyze.py
 python R8/analyze_code/all_analyze.py --diff-mode accum
-python R8/analyze_code/all_analyze.py --diff-mode fourier --max-frames 2
-python R8/analyze_code/all_analyze.py --mid-search --max-frames 1
+python R8/analyze_code/all_analyze.py --diff-mode fourier
+python R8/analyze_code/all_analyze.py --mid-search
 python R8/analyze_code/all_analyze.py --force-extract
 ```
 

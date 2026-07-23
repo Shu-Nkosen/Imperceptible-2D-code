@@ -24,6 +24,7 @@ from hully_diff import (
     build_pair_diff_stack,
     generate_accum_maps,
     generate_fourier_maps,
+    generate_lockin_maps,
     generate_pair_maps,
     generate_stat_maps,
     save_map_png,
@@ -65,11 +66,14 @@ from run_pipeline import (
 )
 from time_fft import resolve_target_freqs
 
+# (pass_label, diff_mode, stat_kind)
+# lockin = d(t) 複素ロックイン / fourier = d(t) 帯付き FFT（別CSV）
 ALL_PASSES: Tuple[Tuple[str, str, str], ...] = (
     ("pair", "pair", ""),
     ("accum", "accum", ""),
     ("stat_std", "stat", "std"),
     ("stat_var", "stat", "var"),
+    ("lockin", "lockin", ""),
     ("fourier", "fourier", ""),
 )
 
@@ -137,6 +141,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--window-ns", type=str, default="")
     p.add_argument("--diff-thresholds", type=str, default="")
     p.add_argument("--target-freqs", type=str, default="")
+    p.add_argument(
+        "--fourier-band-radius",
+        type=int,
+        default=1,
+        help="fourier(帯付きFFT) の target 前後ビン数（既定: 1）",
+    )
     p.add_argument("--quiet", action="store_true")
     return p.parse_args()
 
@@ -199,14 +209,16 @@ def build_sweeps(
         default_th = DIFF_THRESHOLDS_STAT_VAR if stat_kind == "var" else DIFF_THRESHOLDS_STAT_STD
         thresholds = parse_int_list(ns.diff_thresholds, default_th)
         sweeps = [SweepKey(diff_mode, stat_kind, None, None, th) for th in thresholds]
-    elif diff_mode == "fourier":
+    elif diff_mode in ("fourier", "lockin"):
         thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_FOURIER)
         if ns.target_freqs.strip():
             target_freqs = parse_float_list(ns.target_freqs, ())
         elif meta is not None:
             target_freqs = tuple(resolve_target_freqs(meta.rate_hz, fps))
         else:
-            raise SystemExit("fourier には --target-freqs か rate_hz 付き動画名が必要です")
+            raise SystemExit(
+                f"{diff_mode} には --target-freqs か rate_hz 付き動画名が必要です"
+            )
         sweeps = [
             SweepKey(diff_mode, "", None, freq, th)
             for freq in target_freqs
@@ -223,6 +235,7 @@ def generate_maps_for_sweep(
     sweep: SweepKey,
     fps: float,
     pair_each_end: int,
+    fourier_band_radius: int = 1,
 ) -> List[MapSpec]:
     if sweep.diff_mode == "pair":
         return generate_pair_maps(d_stack, sweep.diff_threshold, pair_each_end)
@@ -231,9 +244,18 @@ def generate_maps_for_sweep(
         return generate_accum_maps(d_stack, sweep.window_n, sweep.diff_threshold, pair_each_end)
     if sweep.diff_mode == "stat":
         return generate_stat_maps(d_stack, sweep.stat_kind, sweep.diff_threshold)
+    if sweep.diff_mode == "lockin":
+        assert sweep.fft_target_hz is not None
+        return generate_lockin_maps(d_stack, fps, sweep.fft_target_hz, sweep.diff_threshold)
     if sweep.diff_mode == "fourier":
         assert sweep.fft_target_hz is not None
-        return generate_fourier_maps(d_stack, fps, sweep.fft_target_hz, sweep.diff_threshold)
+        return generate_fourier_maps(
+            d_stack,
+            fps,
+            sweep.fft_target_hz,
+            sweep.diff_threshold,
+            band_radius=fourier_band_radius,
+        )
     return []
 
 
@@ -461,6 +483,11 @@ def main() -> None:
         log_info(
             f"[INFO] pass={pass_label} diff_mode={diff_mode} "
             f"stat_kind={stat_kind or '-'} sweeps={len(sweeps)}"
+            + (
+                f" band_radius={int(ns.fourier_band_radius)}"
+                if diff_mode == "fourier"
+                else ""
+            )
         )
 
     reused_conditions = 0
@@ -515,6 +542,7 @@ def main() -> None:
                     sweep,
                     fps,
                     PAIR_OUTPUT_EACH_END if diff_mode == "pair" else 0,
+                    fourier_band_radius=int(ns.fourier_band_radius),
                 )
                 if ns.save_diff_maps == "all":
                     all_specs_for_save.extend(specs)
