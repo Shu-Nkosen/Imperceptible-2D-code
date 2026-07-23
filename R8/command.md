@@ -14,6 +14,8 @@
 python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 4,8,12 --channels R,G,B,max,min --clip-margin 12
 ```
 
+`slate_black.png` / `slate_red.png`（同期用・ピント格子付き）と `gt_qr_display.png` もここで生成されます。表示前に再実行し、続けて `present_session.exe` を再ビルドしてください。
+
 ### プレゼンターのビルド
 
 ```powershell
@@ -58,11 +60,12 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 |---|---|---|
 | `--block-sec` | `6` | 1条件の秒数 |
 | `--slate-sec` | `0.5` | 黒/赤スレート各秒数 |
-| `--padding-sec` | `5` | 同期前後の黒余白 |
+| `--padding-sec` | `5` | 同期前後の黒余白（`slate_black.png` のピント格子） |
 | `--qr-sec` | `3` | GT用QR表示秒数 |
 | `--repeat` | `1` | normal/inv のフレーム反復 |
 
-表示順: 黒5s → 黒/赤0.5s → 黒5s → QR3s → 条件0–29 → QR3s → 条件30–59 → QR3s
+表示順: 黒5s → 黒/赤0.5s → 黒5s → QR3s → 条件0–29 → QR3s → 条件30–59 → QR3s  
+（同期の黒/赤は `slate_*.png`。無い場合は単色フォールバック）
 
 ---
 

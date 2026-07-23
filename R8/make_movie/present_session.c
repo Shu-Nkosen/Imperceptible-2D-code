@@ -1,5 +1,5 @@
 // R8 sweep presenter (GLFW)
-// - Slate: black -> red (for sync detection)
+// - Slate: black -> red (for sync detection), preferably slate_*.png with focus grid
 // - Then 60 blocks, each block_sec long
 // - In each block, alternate normal/inv textures every frame (or every repeat frame)
 //
@@ -114,6 +114,15 @@ static void draw_black_frames(GLFWwindow* window, int frames) {
     for (int f = 0; f < frames && !glfwWindowShouldClose(window); f++) {
         if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
         draw_solid(0.0f, 0.0f, 0.0f);
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+}
+
+static void draw_solid_frames(GLFWwindow* window, int frames, float r, float g, float b) {
+    for (int f = 0; f < frames && !glfwWindowShouldClose(window); f++) {
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+        draw_solid(r, g, b);
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
@@ -269,6 +278,26 @@ static void draw_texture_frames(GLFWwindow* window, GLuint texture_id, int frame
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+}
+
+static GLuint try_load_texture(const char* filename) {
+    if (!file_exists(filename)) return 0;
+    return load_texture(filename);
+}
+
+static void draw_slate_frames(
+    GLFWwindow* window,
+    GLuint texture_id,
+    int frames,
+    float fallback_r,
+    float fallback_g,
+    float fallback_b
+) {
+    if (texture_id != 0) {
+        draw_texture_frames(window, texture_id, frames);
+        return;
+    }
+    draw_solid_frames(window, frames, fallback_r, fallback_g, fallback_b);
 }
 
 static void write_manifest(
@@ -512,25 +541,32 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Sync slate textures (focus grid). Missing files -> solid fallback.
+    GLuint slate_black_tex = try_load_texture("slate_black.png");
+    GLuint slate_red_tex = try_load_texture("slate_red.png");
+    const int focus_grid_on = (slate_black_tex != 0 && slate_red_tex != 0) ? 1 : 0;
+    if (!focus_grid_on) {
+        printf(
+            "[WARN] slate_black.png / slate_red.png missing or incomplete; "
+            "using solid black/red (run gen_assets.py for focus grid)\\n"
+        );
+    }
+
     printf(
         "[INFO] timeline: pre_padding=%d -> slate_black=%d -> slate_red=%d -> post_padding=%d "
-        "-> QR(%d)x3 interleaved with conditions\\n",
-        padding_frames, slate_frames, slate_frames, padding_frames, qr_frames
+        "-> QR(%d)x3 interleaved with conditions focus_grid=%s\\n",
+        padding_frames, slate_frames, slate_frames, padding_frames, qr_frames,
+        focus_grid_on ? "on" : "off"
     );
     printf("[INFO] gt_qr_sec=%.3f (before cond0, before cond30, after last)\\n", qr_sec);
 
-    draw_black_frames(window, padding_frames);
+    draw_slate_frames(window, slate_black_tex, padding_frames, 0.0f, 0.0f, 0.0f);
 
     // Slate: black -> red (sync signal)
-    draw_black_frames(window, slate_frames);
-    for (int f = 0; f < slate_frames && !glfwWindowShouldClose(window); f++) {
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
-        draw_solid(1.0f, 0.0f, 0.0f);
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
+    draw_slate_frames(window, slate_black_tex, slate_frames, 0.0f, 0.0f, 0.0f);
+    draw_slate_frames(window, slate_red_tex, slate_frames, 1.0f, 0.0f, 0.0f);
 
-    draw_black_frames(window, padding_frames);
+    draw_slate_frames(window, slate_black_tex, padding_frames, 0.0f, 0.0f, 0.0f);
 
     printf("[INFO] start conditions: %d blocks, block_frames=%d, repeat=%d\\n", cond_count, block_frames, repeat);
 
