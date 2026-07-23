@@ -1,0 +1,2 @@
+﻿folder,decode_note,decode_variant,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold,pixel_acc_all,pixel_acc_ok,pixel_acc_best,best_pair_frame_1,best_pair_frame_2,video,display_rate,exposure,fluorescent,camera_fps,cond,image,channel,token,intensity,decode_decoded_text,decode_method,decode_frame_1,decode_frame_2,note,analysis_frames,extract_sec
+rice_R_4,QR未検出,,pair,,,,2,0.768402,,0.856929,frame_00067.png,frame_00068.png,r45_e60_f0.mp4,45 Hz,1/60,蛍光灯なし,58.592 fps,0,rice,R,R,4,,,frame_00110.png,frame_00111.png,,117,1.996868
