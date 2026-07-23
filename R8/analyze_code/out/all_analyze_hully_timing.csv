@@ -124,3 +124,4 @@ RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresh
     raise RuntimeError(""SYNC detection failed (black->red not found). Try adjusting thresholds."")
 RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.",hully_single_pass
 2026-07-24 01:24:50,r90_e60_f1.mp4,OK,3463.3,,hully_single_pass
+2026-07-24 02:24:19,r90_e250_f1.mp4,OK,3564.8,,hully_single_pass

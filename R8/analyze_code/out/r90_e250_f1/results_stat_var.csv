@@ -1,5 +1,5 @@
 ﻿folder,decode_note,decode_variant,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold,pixel_acc_all,pixel_acc_ok,pixel_acc_best,best_pair_frame_1,best_pair_frame_2,video,display_rate,exposure,fluorescent,camera_fps,cond,image,channel,token,intensity,decode_decoded_text,decode_method,decode_frame_1,decode_frame_2,note,analysis_frames,extract_sec
-rice_R_4,QR未検出,,stat,,var,,2,0.636532,,0.636532,frame_00000.png,frame_00119.png,r90_e250_f1.mp4,90 Hz,1/250,蛍光灯あり,59.982 fps,0,rice,R,R,4,,,frame_00000.png,frame_00119.png,,120,0.000000
+rice_R_4,QR未検出,,stat,,var,,2,0.636532,,0.636532,frame_00000.png,frame_00119.png,r90_e250_f1.mp4,90 Hz,1/250,蛍光灯あり,59.982 fps,0,rice,R,R,4,,,frame_00000.png,frame_00119.png,,120,2.000599
 rice_R_8,QR未検出,,stat,,var,,2,0.636532,,0.636532,frame_00000.png,frame_00119.png,,,,,,1,rice,R,R,8,,,frame_00000.png,frame_00119.png,,120,2.000599
 rice_R_12,QR未検出,,stat,,var,,1,0.944420,,0.944420,frame_00000.png,frame_00119.png,,,,,,2,rice,R,R,12,,,frame_00000.png,frame_00119.png,,120,2.000599
 nagaoka_fireworks_R_4,QR未検出,,stat,,var,,1,0.636588,,0.636588,frame_00000.png,frame_00119.png,,,,,,3,nagaoka_fireworks,R,R,4,,,frame_00000.png,frame_00119.png,,120,2.000599
