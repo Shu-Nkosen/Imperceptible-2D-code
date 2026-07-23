@@ -86,18 +86,30 @@ def pair_index_pairs(n_diffs: int, n_each: int) -> List[Tuple[int, int]]:
     return out
 
 
-def accum_map_from_diff(d_stack: np.ndarray, window_n: int) -> np.ndarray:
-    """非重複窓で |d| を合算 → (H,W)。"""
+def accum_maps_from_diff(
+    d_stack: np.ndarray, window_n: int
+) -> List[Tuple[np.ndarray, int, int]]:
+    """非重複窓ごとに |d| を合算 → [(acc_map, start_frame, end_frame), ...]。
+
+    baseline ``process_directory_accum`` と同じ: 長さ window_n のフレーム窓ごとに
+    隣接差分 (window_n-1) 本の絶対値を合算し、窓ごとに1マップを返す。
+    """
+    if window_n < 2:
+        raise ValueError(f"window_n は 2 以上である必要があります: {window_n}")
     t_len = d_stack.shape[0]
-    if t_len < window_n:
-        return np.zeros(d_stack.shape[1:], dtype=np.float32)
-    acc = None
-    for start in range(0, t_len - window_n + 1, window_n):
-        chunk = d_stack[start : start + window_n]
-        part = np.abs(chunk).sum(axis=0)
-        acc = part if acc is None else acc + part
-    assert acc is not None
-    return acc.astype(np.float32)
+    n_frames = t_len + 1
+    if n_frames < window_n or t_len < 1:
+        return []
+    out: List[Tuple[np.ndarray, int, int]] = []
+    for start in range(0, n_frames - window_n + 1, window_n):
+        # フレーム [start, start+window_n) → 差分 d[start : start+window_n-1]
+        chunk = d_stack[start : start + window_n - 1]
+        if chunk.shape[0] == 0:
+            continue
+        acc = np.abs(chunk).sum(axis=0).astype(np.float32)
+        end_frame = start + window_n - 1
+        out.append((acc, start, end_frame))
+    return out
 
 
 def stat_map_from_diff(d_stack: np.ndarray, kind: str) -> np.ndarray:
@@ -156,31 +168,28 @@ def generate_accum_maps(
     d_stack: np.ndarray,
     window_n: int,
     threshold: int,
-    pair_each_end: int,
+    pair_each_end: int = 0,
 ) -> List[MapSpec]:
+    """窓ごと1枚の MapSpec（pair_each_end は無視。baseline 同様全窓）。"""
+    _ = pair_each_end
     th = float(threshold) / 255.0
     subdir = f"rgb_max_accum_n{window_n}_th{threshold}"
-    acc = accum_map_from_diff(d_stack, window_n)
-    inc, dec, unch = classify_scalar_map(acc, th)
-    rgb = _diff_to_rgb(inc, dec, unch)
-    n_diffs = d_stack.shape[0]
-    if n_diffs <= 0:
-        return []
-    pairs = pair_index_pairs(n_diffs, pair_each_end)
-    t1, t2 = pairs[0] if pairs else (0, min(1, n_diffs))
-    end_t2 = pairs[-1][1] if pairs else t2
-    specs = [
-        MapSpec(
-            rgb=rgb,
-            diff_mode="accum",
-            diff_threshold=threshold,
-            window_n=window_n,
-            frame_1=frame_name(t1),
-            frame_2=frame_name(end_t2),
-            diff_subdir=subdir,
-            pair_name=build_pair_name(t1, end_t2),
+    specs: List[MapSpec] = []
+    for acc, t1, t2 in accum_maps_from_diff(d_stack, window_n):
+        inc, dec, unch = classify_scalar_map(acc, th)
+        rgb = _diff_to_rgb(inc, dec, unch)
+        specs.append(
+            MapSpec(
+                rgb=rgb,
+                diff_mode="accum",
+                diff_threshold=threshold,
+                window_n=window_n,
+                frame_1=frame_name(t1),
+                frame_2=frame_name(t2),
+                diff_subdir=subdir,
+                pair_name=build_pair_name(t1, t2),
+            )
         )
-    ]
     return specs
 
 
