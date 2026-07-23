@@ -24,7 +24,7 @@ ex_G_4,QR未検出,,pair,,,,12,0.636040,,0.636845,frame_00099.png,frame_00100.pn
 ex_G_8,QR未検出,,pair,,,,12,0.636200,,0.636826,frame_00003.png,frame_00004.png,,,,,,22,ex,G,G,8,,,frame_00117.png,frame_00118.png,,119,1.987555
 ex_G_12,QR未検出,,pair,,,,12,0.636553,,0.637386,frame_00014.png,frame_00015.png,,,,,,23,ex,G,G,12,,,frame_00117.png,frame_00118.png,,119,1.987555
 rice_B_4,QR未検出,,pair,,,,12,0.635895,,0.636758,frame_00010.png,frame_00011.png,,,,,,24,rice,B,B,4,,,frame_00117.png,frame_00118.png,,119,1.987555
-rice_B_8,QR未検出,,pair,,,,12,0.635746,,0.636516,frame_00001.png,frame_00002.png,,,,,,25,rice,B,B,8,,,frame_00116.png,frame_00117.png,,119,1.987555
+rice_B_8,QR未検出,,pair,,,,12,0.635746,,0.636516,frame_00001.png,frame_00002.png,,,,,,25,rice,B,B,8,,,frame_00117.png,frame_00118.png,,119,1.987555
 rice_B_12,QR未検出,,pair,,,,12,0.635728,,0.637062,frame_00017.png,frame_00018.png,,,,,,26,rice,B,B,12,,,frame_00117.png,frame_00118.png,,119,1.987555
 nagaoka_fireworks_B_4,QR未検出,,pair,,,,12,0.633919,,0.636014,frame_00115.png,frame_00116.png,,,,,,27,nagaoka_fireworks,B,B,4,,,frame_00117.png,frame_00118.png,,119,1.987555
 nagaoka_fireworks_B_8,QR未検出,,pair,,,,12,0.634528,,0.635682,frame_00008.png,frame_00009.png,,,,,,28,nagaoka_fireworks,B,B,8,,,frame_00117.png,frame_00118.png,,119,1.987555
@@ -57,5 +57,5 @@ hocho_X_4,QR未検出,,pair,,,,12,0.632770,,0.635561,frame_00115.png,frame_00116
 hocho_X_8,QR未検出,,pair,,,,12,0.632406,,0.634868,frame_00112.png,frame_00113.png,,,,,,55,hocho,max,X,8,,,frame_00117.png,frame_00118.png,,119,1.987555
 hocho_X_12,QR未検出,,pair,,,,12,0.631173,,0.632994,frame_00111.png,frame_00112.png,,,,,,56,hocho,max,X,12,,,frame_00117.png,frame_00118.png,,119,1.987555
 ex_X_4,QR未検出,,pair,,,,12,0.636270,,0.636805,frame_00018.png,frame_00019.png,,,,,,57,ex,max,X,4,,,frame_00117.png,frame_00118.png,,119,1.987555
-ex_X_8,QR未検出,,pair,,,,12,0.635910,,0.636660,frame_00111.png,frame_00112.png,,,,,,58,ex,max,X,8,,,frame_00117.png,frame_00118.png,,119,1.987555
+ex_X_8,QR未検出,,pair,,,,12,0.635910,,0.636660,frame_00111.png,frame_00112.png,,,,,,58,ex,max,X,8,,,frame_00116.png,frame_00117.png,,119,1.987555
 ex_X_12,QR未検出,,pair,,,,12,0.636177,,0.636882,frame_00114.png,frame_00115.png,,,,,,59,ex,max,X,12,,,frame_00117.png,frame_00118.png,,119,1.987555
