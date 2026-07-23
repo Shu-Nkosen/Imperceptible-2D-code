@@ -18,8 +18,8 @@ nagaoka_fireworks_G_4,QR未検出,,pair,,,,4,0.653940,,0.703261,frame_00096.png,
 nagaoka_fireworks_G_8,QR未検出,,pair,,,,4,0.760517,,0.818360,frame_00099.png,frame_00100.png,,,,,,16,nagaoka_fireworks,G,G,8,,,frame_00115.png,frame_00116.png,,117,1.988774
 nagaoka_fireworks_G_12,QR未検出,,pair,,,,8,0.821889,,0.916742,frame_00096.png,frame_00097.png,,,,,,17,nagaoka_fireworks,G,G,12,,,frame_00115.png,frame_00116.png,,117,1.988774
 hocho_G_4,QR未検出,,pair,,,,4,0.658640,,0.675602,frame_00007.png,frame_00008.png,,,,,,18,hocho,G,G,4,,,frame_00115.png,frame_00116.png,,117,1.988774
-hocho_G_8,QR未検出,,pair,,,,4,0.720724,,0.746312,frame_00008.png,frame_00009.png,,,,,,19,hocho,G,G,8,,,frame_00115.png,frame_00116.png,,117,1.988774
-hocho_G_12,QR未検出,,pair,,,,4,0.853018,,0.886567,frame_00003.png,frame_00004.png,,,,,,20,hocho,G,G,12,,,frame_00114.png,frame_00115.png,,117,1.988774
+hocho_G_8,QR未検出,,pair,,,,4,0.720724,,0.746312,frame_00008.png,frame_00009.png,,,,,,19,hocho,G,G,8,,,frame_00114.png,frame_00115.png,,117,1.988774
+hocho_G_12,QR未検出,,pair,,,,4,0.853018,,0.886567,frame_00003.png,frame_00004.png,,,,,,20,hocho,G,G,12,,,frame_00115.png,frame_00116.png,,117,1.988774
 ex_G_4,QR未検出,,pair,,,,4,0.710782,,0.801467,frame_00113.png,frame_00114.png,,,,,,21,ex,G,G,4,,,frame_00115.png,frame_00116.png,,117,1.988774
 ex_G_8,QR未検出,,pair,,,,4,0.814846,,0.906179,frame_00017.png,frame_00018.png,,,,,,22,ex,G,G,8,,,frame_00115.png,frame_00116.png,,117,1.988774
 ex_G_12,,zxing_gray,pair,,,,12,0.929488,0.960727,0.964699,frame_00015.png,frame_00016.png,,,,,,23,ex,G,G,12,https://www.nagaoka-ct.ac.jp,zxing_gray_x1.0_k5_i1,frame_00010.png,frame_00011.png,,117,1.988774
@@ -37,12 +37,12 @@ ex_B_8,QR未検出,,pair,,,,4,0.726586,,0.823061,frame_00097.png,frame_00098.png
 ex_B_12,QR未検出,,pair,,,,4,0.772799,,0.844638,frame_00019.png,frame_00020.png,,,,,,35,ex,B,B,12,,,frame_00115.png,frame_00116.png,,117,1.988774
 rice_I_4,QR未検出,,pair,,,,4,0.692196,,0.749493,frame_00105.png,frame_00106.png,,,,,,36,rice,min,I,4,,,frame_00115.png,frame_00116.png,,117,1.988774
 rice_I_8,QR未検出,,pair,,,,4,0.816587,,0.859071,frame_00097.png,frame_00098.png,,,,,,37,rice,min,I,8,,,frame_00115.png,frame_00116.png,,117,1.988774
-rice_I_12,QR未検出,,pair,,,,8,0.837773,,0.907092,frame_00096.png,frame_00097.png,,,,,,38,rice,min,I,12,,,frame_00115.png,frame_00116.png,,117,1.988774
+rice_I_12,QR未検出,,pair,,,,8,0.837773,,0.907092,frame_00096.png,frame_00097.png,,,,,,38,rice,min,I,12,,,frame_00114.png,frame_00115.png,,117,1.988774
 nagaoka_fireworks_I_4,QR未検出,,pair,,,,4,0.673386,,0.694905,frame_00106.png,frame_00107.png,,,,,,39,nagaoka_fireworks,min,I,4,,,frame_00115.png,frame_00116.png,,117,1.988774
 nagaoka_fireworks_I_8,QR未検出,,pair,,,,4,0.743831,,0.760788,frame_00115.png,frame_00116.png,,,,,,40,nagaoka_fireworks,min,I,8,,,frame_00115.png,frame_00116.png,,117,1.988774
 nagaoka_fireworks_I_12,QR未検出,,pair,,,,8,0.834487,,0.850358,frame_00110.png,frame_00111.png,,,,,,41,nagaoka_fireworks,min,I,12,,,frame_00115.png,frame_00116.png,,117,1.988774
 hocho_I_4,QR未検出,,pair,,,,12,0.635795,,0.636618,frame_00108.png,frame_00109.png,,,,,,42,hocho,min,I,4,,,frame_00115.png,frame_00116.png,,117,1.988774
-hocho_I_8,QR未検出,,pair,,,,4,0.645754,,0.668434,frame_00016.png,frame_00017.png,,,,,,43,hocho,min,I,8,,,frame_00115.png,frame_00116.png,,117,1.988774
+hocho_I_8,QR未検出,,pair,,,,4,0.645754,,0.668434,frame_00016.png,frame_00017.png,,,,,,43,hocho,min,I,8,,,frame_00114.png,frame_00115.png,,117,1.988774
 hocho_I_12,QR未検出,,pair,,,,4,0.798225,,0.871425,frame_00018.png,frame_00019.png,,,,,,44,hocho,min,I,12,,,frame_00115.png,frame_00116.png,,117,1.988774
 ex_I_4,QR未検出,,pair,,,,4,0.659755,,0.755197,frame_00019.png,frame_00020.png,,,,,,45,ex,min,I,4,,,frame_00115.png,frame_00116.png,,117,1.988774
 ex_I_8,QR未検出,,pair,,,,4,0.730479,,0.841770,frame_00096.png,frame_00097.png,,,,,,46,ex,min,I,8,,,frame_00115.png,frame_00116.png,,117,1.988774
@@ -57,5 +57,5 @@ hocho_X_4,QR未検出,,pair,,,,4,0.659617,,0.685483,frame_00113.png,frame_00114.
 hocho_X_8,QR未検出,,pair,,,,4,0.751823,,0.800522,frame_00114.png,frame_00115.png,,,,,,55,hocho,max,X,8,,,frame_00115.png,frame_00116.png,,117,1.988774
 hocho_X_12,QR未検出,,pair,,,,8,0.836170,,0.856273,frame_00112.png,frame_00113.png,,,,,,56,hocho,max,X,12,,,frame_00115.png,frame_00116.png,,117,1.988774
 ex_X_4,QR未検出,,pair,,,,4,0.665642,,0.737929,frame_00016.png,frame_00017.png,,,,,,57,ex,max,X,4,,,frame_00115.png,frame_00116.png,,117,1.988774
-ex_X_8,QR未検出,,pair,,,,4,0.722360,,0.825596,frame_00018.png,frame_00019.png,,,,,,58,ex,max,X,8,,,frame_00115.png,frame_00116.png,,117,1.988774
+ex_X_8,QR未検出,,pair,,,,4,0.722360,,0.825596,frame_00018.png,frame_00019.png,,,,,,58,ex,max,X,8,,,frame_00114.png,frame_00115.png,,117,1.988774
 ex_X_12,QR未検出,,pair,,,,8,0.831784,,0.897450,frame_00019.png,frame_00020.png,,,,,,59,ex,max,X,12,,,frame_00115.png,frame_00116.png,,117,1.988774
