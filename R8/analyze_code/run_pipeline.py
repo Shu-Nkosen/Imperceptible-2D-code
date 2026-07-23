@@ -88,7 +88,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--full-search",
         action="store_true",
-        help="passed to decode_qr_from_all_frames.py (全バリアント+拡大+cascade+Multi)",
+        help="passed to decode_qr_from_all_frames.py (全バリアント+拡大1/2/3+kernels 3/5/7+cascade+Multi)",
     )
     p.add_argument(
         "--diff-mode",

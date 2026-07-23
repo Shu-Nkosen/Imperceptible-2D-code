@@ -49,7 +49,7 @@ MID_MEDIAN_KERNELS = (3, 5, 7)
 # search mode: fast | mid | full
 # fast: gray × kernel=5 × 最精度デコード1回（detectAndDecodeMulti）
 # mid:  gray+median_otsu × kernels 3/5/7 × cascade+Multi
-# full: all variants + scales + cascade+Multi
+# full: all variants + scales 1/2/3 × kernels 3/5/7 × cascade+Multi
 
 
 def parse_kernel_list(text: str) -> List[int]:
@@ -869,7 +869,7 @@ def main() -> None:
     parser.add_argument(
         "--full-search",
         action="store_true",
-        help="全バリアント×全スケール(1/2/3)×cascade+Multiで徹底探索（遅い）",
+        help="全バリアント×拡大(1/2/3)×median kernels 3/5/7×cascade+Multiで徹底探索（遅い）",
     )
     parser.add_argument(
         "--workers",
@@ -913,7 +913,7 @@ def main() -> None:
     search_mode = resolve_search_mode(args.mid_search, args.full_search)
     if args.median_kernels:
         kernel_candidates = parse_kernel_list(args.median_kernels)
-    elif search_mode == "mid":
+    elif search_mode in ("mid", "full"):
         kernel_candidates = list(MID_MEDIAN_KERNELS)
     else:
         kernel_candidates = [median_kernel]

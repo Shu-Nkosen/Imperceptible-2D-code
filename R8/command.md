@@ -207,7 +207,7 @@ cd R8\make_movie
 |---|---|---|
 | fast（既定・検証用） | （なし） | gray × kernel5 × 最精度デコード1回（`detectAndDecodeMulti`） |
 | mid | `--mid-search` | gray + median_otsu、kernel 3/5/7、cascade+Multi |
-| full | `--full-search` | 全バリアント + 拡大1/2/3 + cascade+Multi |
+| full | `--full-search` | 全バリアント + 拡大1/2/3 + kernel 3/5/7 + cascade+Multi |
 
 ### 2.3 残すフレーム枚数
 
@@ -475,17 +475,17 @@ python R8/analyze_code/all_analyze_hard.py
 5. `lockin`
 6. `fourier`
 
-**hard の厚み:** `--full-search` + `--hard-sweeps`（閾値・窓・全ペア・band_radius=2・周波数候補増・lockin phase_steps 4/8/16・pair以外の `*_num` gray 数値地図）+ `--keep-frames 120` + `--save-diff-maps all` + `phone_try/<pass>/` + `logs/`。  
-`--mid-search` を付けると full の代わりに mid になる。`*_num` は固定 th 二値化と併記（比較用）。
+**hard の厚み:** `--mid-search` + `--hard-sweeps`（閾値・窓・全ペア・band_radius=2・周波数候補増・lockin phase_steps 4/8/16・pair以外の `*_num` gray 数値地図）+ `--keep-frames 120` + `--save-diff-maps all` + `phone_try/<pass>/` + `logs/`。  
+`--full-search` を付けるとデコードを full（全バリアント×拡大）に上げる。`*_num` は固定 th 二値化と併記（比較用）。
 
 **例:**
 
 ```bash
-# 全動画（既定・徹底 = full-search）
+# 全動画（既定・徹底 = mid-search）
 python R8/analyze_code/all_analyze_hard.py
 
-# mid に落としてやや軽く
-python R8/analyze_code/all_analyze_hard.py --mid-search
+# デコードだけ full に上げる
+python R8/analyze_code/all_analyze_hard.py --full-search
 
 # 切り出し再利用 / I/O を抑える（追加引数は -- の後）
 python R8/analyze_code/all_analyze_hard.py -- --reuse-frames

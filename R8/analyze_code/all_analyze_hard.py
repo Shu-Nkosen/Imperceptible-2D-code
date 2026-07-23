@@ -66,7 +66,7 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         description=(
             "R8/movie 内の動画を run_pipeline_hully で徹底解析する（out_hard）。"
             "hully の全手法に加え、pair以外の数値スコア→grayデコード(*_num)も実行する。"
-            "--hard-sweeps + --full-search で閾値・窓・全ペア・周波数・phase_steps・デコードを拡大する。"
+            "--hard-sweeps + --mid-search で閾値・窓・全ペア・周波数・phase_steps を拡大する。"
             "フレーム PNG と差分 PNG（all）を残し、手法ごとのログと phone_try を作る。"
         )
     )
@@ -79,14 +79,19 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         help="run_pipeline_hully の --out-dir（未指定時: R8/analyze_code/out_hard）",
     )
     p.add_argument(
+        "--full-search",
+        action="store_true",
+        help="既定の mid-search の代わりに full-search（全バリアント×拡大1/2/3）を使う",
+    )
+    p.add_argument(
         "--mid-search",
         action="store_true",
-        help="既定の full-search の代わりに mid-search を使う",
+        help="互換用（既定が mid のため何もしない）",
     )
     p.add_argument(
         "--no-mid-search",
         action="store_true",
-        help="互換用（既定が full のため何もしない）",
+        help="互換用（既定が mid のため何もしない）",
     )
     p.add_argument(
         "--no-auto-git",
@@ -167,10 +172,10 @@ def build_hard_args(
     video_path: Path,
     manifest_path: Path,
     out_dir: str,
-    mid_search: bool,
+    full_search: bool,
     shared_extra: Sequence[str],
 ) -> List[str]:
-    """hard 既定: hully 全手法 + hard-sweeps + full-search + フレーム/差分を厚く残す。"""
+    """hard 既定: hully 全手法 + hard-sweeps + mid-search + フレーム/差分を厚く残す。"""
     extra = list(shared_extra)
     if not has_cli_flag(extra, "--workers"):
         extra = ["--workers", "16", *extra]
@@ -181,10 +186,10 @@ def build_hard_args(
     if "--hard-sweeps" not in extra:
         extra = ["--hard-sweeps", *extra]
     if not has_cli_flag(extra, "--mid-search") and not has_cli_flag(extra, "--full-search"):
-        if mid_search:
-            extra.append("--mid-search")
-        else:
+        if full_search:
             extra.append("--full-search")
+        else:
+            extra.append("--mid-search")
 
     args = [
         "--video",
@@ -347,10 +352,10 @@ def run_one_video(
     manifest_path: Path,
     out_dir: str,
     default_out: Path,
-    mid_search: bool,
+    full_search: bool,
     shared_extra: Sequence[str],
 ) -> Tuple[VideoRunResult, str]:
-    args = build_hard_args(video_path, manifest_path, out_dir, mid_search, shared_extra)
+    args = build_hard_args(video_path, manifest_path, out_dir, full_search, shared_extra)
     cmd = [sys.executable, str(pipeline_script), *args]
     out_root = resolve_out_root(video_path, out_dir, default_out)
     captured = ""
@@ -471,7 +476,7 @@ def main() -> int:
     videos, rejected = discover_videos(movie_dir)
     print(
         f"[INFO] hard: videos={len(videos)} rejected={len(rejected)} "
-        f"pipeline=hully+hard-sweeps+full-search passes={list(HULLY_PASSES)} out={default_out}"
+        f"pipeline=hully+hard-sweeps+mid-search passes={list(HULLY_PASSES)} out={default_out}"
     )
     if rejected:
         print("[WARN] skipped (invalid name):")
@@ -512,7 +517,7 @@ def main() -> int:
             manifest_path,
             out_dir_arg,
             default_out,
-            ns.mid_search,
+            ns.full_search,
             pipeline_extra,
         )
         results.append(result)

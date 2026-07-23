@@ -182,7 +182,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "閾値・窓・全ペア・band_radius・周波数候補・lockin phase_steps を拡大し、"
             "pair以外に数値スコア→grayデコード経路(*_num)も追加"
-            "（all_analyze_hard 用。デコード full は orchestrator 側）"
+            "（all_analyze_hard 用。デコード mid/full は orchestrator 側）"
         ),
     )
     p.add_argument(
@@ -228,7 +228,8 @@ def load_rgb_frames(cond_dir: Path, count: int) -> List[np.ndarray]:
 
 
 def resolve_kernel_candidates(search_mode: str) -> List[int]:
-    if search_mode == "mid":
+    # mid / full ともメディアンカーネル 3/5/7（fast のみ既定5）
+    if search_mode in ("mid", "full"):
         return list(MID_MEDIAN_KERNELS)
     return [5]
 
