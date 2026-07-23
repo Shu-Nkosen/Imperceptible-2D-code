@@ -128,3 +128,4 @@ RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresh
 2026-07-24 03:22:25,r120_e60_f1.mp4,OK,3482.1,,hully_single_pass
 2026-07-24 04:21:22,r120_e250_f1.mp4,OK,3533.6,,hully_single_pass
 2026-07-24 05:19:30,r180_e60_f1.mp4,OK,3484.2,,hully_single_pass
+2026-07-24 06:18:49,r180_e250_f1.mp4,OK,3554.8,,hully_single_pass
