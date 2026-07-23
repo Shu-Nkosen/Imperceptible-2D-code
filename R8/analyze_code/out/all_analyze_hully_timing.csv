@@ -1,0 +1,109 @@
+﻿finished_at,video,status,elapsed_sec,note,pass_breakdown
+2026-07-22 18:22:39,r45_e60_f0.mp4,FAIL,9.3,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:22:49,r45_e60_f1.mp4,FAIL,9.8,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:22:54,r45_e250_f0.mp4,FAIL,4.6,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:22:58,r45_e250_f1.mp4,FAIL,4.5,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:23:08,r60_e60_f1.mp4,FAIL,10.3,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:26:22,r60_e250_f1.mp4,FAIL,194.0,"exit=1: lack_to_red_sync
+    raise RuntimeError(""SYNC detection failed (black->red not found). Try adjusting thresholds."")
+RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.",hully_single_pass
+2026-07-22 18:26:34,r90_e60_f1.mp4,FAIL,11.5,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=118",hully_single_pass
+2026-07-22 18:26:46,r90_e250_f1.mp4,FAIL,12.1,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:26:59,r120_e60_f1.mp4,FAIL,13.6,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:27:13,r120_e250_f1.mp4,FAIL,13.3,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=119",hully_single_pass
+2026-07-22 18:27:25,r180_e60_f1.mp4,FAIL,12.2,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=118",hully_single_pass
+2026-07-22 18:27:30,r180_e250_f1.mp4,FAIL,4.7,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:38:17,r45_e60_f0.mp4,FAIL,9.5,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:38:27,r45_e60_f1.mp4,FAIL,10.2,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:38:32,r45_e250_f0.mp4,FAIL,4.2,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:38:36,r45_e250_f1.mp4,FAIL,4.0,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:38:46,r60_e60_f1.mp4,FAIL,10.0,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:41:32,r60_e250_f1.mp4,FAIL,166.6,"exit=1: lack_to_red_sync
+    raise RuntimeError(""SYNC detection failed (black->red not found). Try adjusting thresholds."")
+RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.",hully_single_pass
+2026-07-22 18:41:42,r90_e60_f1.mp4,FAIL,9.8,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=118",hully_single_pass
+2026-07-22 18:41:46,r90_e250_f1.mp4,FAIL,4.2,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 18:41:58,r120_e60_f1.mp4,FAIL,11.8,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=117",hully_single_pass
+2026-07-22 18:42:10,r120_e250_f1.mp4,FAIL,11.4,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=119",hully_single_pass
+2026-07-22 18:42:20,r180_e60_f1.mp4,FAIL,10.5,"exit=1: d diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) extract rice_R_4: frames=118",hully_single_pass
+2026-07-22 18:42:24,r180_e250_f1.mp4,FAIL,4.3,"exit=1: std diff_mode=stat stat_kind=std sweeps=3
+[INFO] pass=stat_var diff_mode=stat stat_kind=var sweeps=3
+[INFO] pass=fourier diff_mode=fourier stat_kind=- sweeps=6
+[INFO] (1/60) reuse rice_R_4: frames=120",hully_single_pass
+2026-07-22 19:29:33,r45_e60_f0.mp4,OK,2757.9,,hully_single_pass
+2026-07-22 20:16:39,r45_e60_f1.mp4,OK,2825.8,,hully_single_pass
+2026-07-22 20:58:50,r45_e250_f0.mp4,OK,2531.7,,hully_single_pass
+2026-07-22 21:41:13,r45_e250_f1.mp4,OK,2542.7,,hully_single_pass
+2026-07-22 22:28:19,r60_e60_f1.mp4,OK,2825.5,,hully_single_pass
+2026-07-22 22:31:05,r60_e250_f1.mp4,FAIL,166.8,"exit=1: lack_to_red_sync
+    raise RuntimeError(""SYNC detection failed (black->red not found). Try adjusting thresholds."")
+RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.",hully_single_pass
+2026-07-22 23:18:36,r90_e60_f1.mp4,OK,2850.2,,hully_single_pass
+2026-07-23 00:06:56,r90_e250_f1.mp4,OK,2900.4,,hully_single_pass
+2026-07-23 00:54:19,r120_e60_f1.mp4,OK,2843.4,,hully_single_pass
+2026-07-23 01:42:38,r120_e250_f1.mp4,OK,2898.2,,hully_single_pass
+2026-07-23 02:30:06,r180_e60_f1.mp4,OK,2848.6,,hully_single_pass
+2026-07-23 03:12:39,r180_e250_f1.mp4,OK,2552.8,,hully_single_pass
