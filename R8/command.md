@@ -456,50 +456,41 @@ python R8/analyze_code/decode_qr_from_all_frames.py --base-dir R8/analyze_code/o
 
 ---
 
-## 4. 一括解析（all_analyze）
+## 4. 一括解析（all_analyze_hard）
 
-`R8/movie` 内の命名規則に合う動画を順番に解析します。1本失敗しても続行します。
+`R8/movie` 内の命名規則に合う動画を順番に解析します。1本失敗しても続行します。  
+出力は既定で **`out_hard/`**（hully の `out/` とは別）。  
+`all_analyze` / `all_analyze_hully` / `all_analyze_hard` は動画ごと・完了時に自動 `git commit` & `push`（`--no-auto-git` で無効化。PNG は ignore）。
 
 ```bash
-python R8/analyze_code/all_analyze.py
+python R8/analyze_code/all_analyze_hard.py
 ```
 
-**既定:** 各動画について次の **全5手法** を順に実行します。
+**中身:** 各動画で `run_pipeline_hully.py` を1回実行（hully と同じ全6手法）。
 
 1. `pair`
 2. `accum`
-3. `stat`（std）
-4. `stat`（var）
-5. `fourier`
+3. `stat_std`
+4. `stat_var`
+5. `lockin`
+6. `fourier`
 
-共通: **fast** + `--workers 16` + **切り出し再利用**（frame は常に120枚残す）  
-動画順は rate → exp → fluoro。2手法目以降は切り出しを再利用します。  
-出力は手法別に `results_pair.csv` / `results_accum.csv` などとして残ります。  
-`--diff-mode ...` を付けた場合は、その手法だけ実行します。
-
-**ログ:** ジョブごとに `target` / `pass` / `result` の3行のみ。詳細はキャプチャし、失敗時だけ末尾を表示。単体 `run_pipeline` は詳細ログ、`--quiet` で要約のみ。
+**hard の厚み:** `--full-search` + `--hard-sweeps`（閾値・窓・全ペア・band_radius=2・周波数候補増・lockin phase_steps 4/8/16・pair以外の `*_num` gray 数値地図）+ `--keep-frames 120` + `--save-diff-maps all` + `phone_try/<pass>/` + `logs/`。  
+`--mid-search` を付けると full の代わりに mid になる。`*_num` は固定 th 二値化と併記（比較用）。
 
 **例:**
 
 ```bash
-# 全手法 × 全動画（既定）
-python R8/analyze_code/all_analyze.py
+# 全動画（既定・徹底 = full-search）
+python R8/analyze_code/all_analyze_hard.py
 
-# 全手法だが端点2枚指定（再利用中は120枚を残す）
-python R8/analyze_code/all_analyze.py --max-frames 2
+# mid に落としてやや軽く
+python R8/analyze_code/all_analyze_hard.py --mid-search
 
-# accum だけ
-python R8/analyze_code/all_analyze.py --diff-mode accum
-
-# fourier だけ
-python R8/analyze_code/all_analyze.py --diff-mode fourier --max-frames 2
-
-# mid に切り替えて全手法
-python R8/analyze_code/all_analyze.py --mid-search
-
-# 切り出しを強制やり直し
-python R8/analyze_code/all_analyze.py --force-extract
+# 切り出し再利用 / I/O を抑える（追加引数は -- の後）
+python R8/analyze_code/all_analyze_hard.py -- --reuse-frames
+python R8/analyze_code/all_analyze_hard.py -- --keep-frames 0 --save-diff-maps top3
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）  
-所要時間: `R8/analyze_code/out/all_analyze_timing.csv`（追記蓄積。`finished_at`, `video`, `pass`, `status`, `elapsed_sec`）
+サマリー: `R8/analyze_code/out_hard/all_analyze_hard_summary.csv`  
+所要時間: `R8/analyze_code/out_hard/all_analyze_hard_timing.csv`

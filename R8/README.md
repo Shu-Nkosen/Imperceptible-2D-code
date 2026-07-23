@@ -257,14 +257,17 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | ファイル | 場所 | 1行の意味 |
 |----------|------|-----------|
 | `results.csv` | `out/<動画stem>/` | **条件1個**の要約（60行） |
-| `results_<pass>.csv` | 同上 | `all_analyze` 実行時の手法別アーカイブ（例: `results_pair.csv`） |
-| `pair_accuracy.csv` | 同上 | **pair モード**で採用閾値のペア正解率（**先頭20＋末尾20** / 条件） |
+| `results_<pass>.csv` | 同上 / `out_hard/<stem>/` | hully / hard の手法別結果（`pair`/`accum`/`stat_std`/`stat_var`/`lockin`/`fourier`） |
+| `pair_accuracy.csv` | 同上 | **pair モード**で採用閾値のペア正解率（先頭＋末尾 / 条件。hard は全ペア） |
 | `qr_decode_all_frames.csv` | 同上 | **差分1枚（ペア/窓）** ごとのデコード詳細（全閾値スイープ含む） |
-| `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別アーカイブ |
-| `all_analyze_summary.csv` | `out/` | **動画×手法** ごとの成否サマリー |
-| `all_analyze_timing.csv` | `out/` | **動画×手法** ごとの所要時間（追記・蓄積） |
+| `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別デコード詳細 |
+| `all_analyze_hard_summary.csv` | `out_hard/` | **動画ごと**の成否サマリー（1本= hully 全手法1回） |
+| `all_analyze_hard_timing.csv` | `out_hard/` | **動画ごと**の所要時間（追記・蓄積） |
+| `logs/pass_hully_hard.log` | `out_hard/<stem>/` | hard 1本分の run_pipeline_hully 全ログ |
+| `logs/pass_index.csv` | 同上 | 手法ごとの目次（status / 時間 / phone_copied） |
+| `phone_try/<pass>/` | 同上 | スマホ試読用にコピーした差分 PNG（条件ごと高acc+ランダム） |
 
-1回の `run_pipeline` は **1つの `diff_mode` のみ**。モード比較は `results_pair.csv` と `results_fourier.csv` などを並べて見ます。
+`run_pipeline_hully` / `all_analyze_hard` は **1動画あたり全6手法**をまとめて実行。モード比較は `results_pair.csv` と `results_lockin.csv` / `results_fourier.csv` などを並べて見ます。
 
 ---
 
@@ -359,68 +362,77 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 
 ---
 
-### `all_analyze_summary.csv`（一括実行サマリー）
+### `all_analyze_hard_summary.csv`（一括実行サマリー）
 
 | 列 | 説明 |
 |----|------|
 | `video` | 動画ファイル名（例: `r180_e250_f1.mp4`） |
-| `pass` | 解析手法: `pair`, `accum`, `stat_std`, `stat_var`, `fourier` |
-| `manifest` | 使った manifest のパス |
 | `status` | `OK` / `FAIL` |
-| `exit_code` | `run_pipeline` の終了コード（0 = 成功） |
-| `note` | 失敗理由（manifest 不在、`run_pipeline exit=1` 等） |
+| `elapsed_sec` | 所要秒（小数1桁） |
+| `note` | 失敗理由（成功時は空） |
+| `phone_copied_total` | `phone_try/` にコピーした PNG 総数 |
 
-### `all_analyze_timing.csv`（所要時間・追記蓄積）
+### `all_analyze_hard_timing.csv`（所要時間・追記蓄積）
 
-`out/all_analyze_timing.csv`。実行のたびに**追記**し、過去行は残します。
+`out_hard/all_analyze_hard_timing.csv`。実行のたびに**追記**し、過去行は残します。
 
 | 列 | 説明 |
 |----|------|
 | `finished_at` | ジョブ完了時刻（`YYYY-MM-DD HH:MM:SS`） |
 | `video` | 動画ファイル名 |
-| `pass` | 解析手法 |
 | `status` | `OK` / `FAIL` |
 | `elapsed_sec` | 所要秒（小数1桁） |
 | `note` | 失敗理由（成功時は空） |
+| `phone_copied_total` | `phone_try/` にコピーした PNG 総数 |
 
 ---
 
-## 一括解析（全動画）
+## 一括解析（all_analyze_hard・徹底検証）
 
-`R8/movie` 内の命名規則に合う `*.mp4` を順番に解析します。1本失敗しても他は続行します。
+`R8/movie` 内の命名規則に合う `*.mp4` を順番に解析します。1本失敗しても他は続行します。  
+出力先は既定で **`out_hard/`**（hully の `out/` とは分離）。
+
+**自動 git:** `all_analyze.py` / `all_analyze_hully.py` / `all_analyze_hard.py` は、**動画ごと**および**全完了時**に `git add -A` → commit → push します（CSV 等。`out`/`out_hard` の PNG は `.gitignore`）。無効化は `--no-auto-git`。
 
 ```bash
-python R8/analyze_code/all_analyze.py
+python R8/analyze_code/all_analyze_hard.py
 ```
 
-**既定:** 各動画について **全解析手法** を次の順で実行します。
+**中身:** 各動画について `run_pipeline_hully.py` を **1回**呼び、hully と同じ **全6手法**を実行します。
 
 1. `pair`
 2. `accum`
-3. `stat`（std）
-4. `stat`（var）
-5. `fourier`
+3. `stat_std`
+4. `stat_var`
+5. `lockin`（d(t) 複素ロックイン）
+6. `fourier`（d(t) 帯付き FFT）
 
-共通設定は **fast** + `--max-frames 120`（互換・間引きなし）+ `--workers 16` + **切り出し再利用**。  
-手法ごとの結果は `results_<pass>.csv` / `qr_decode_all_frames_<pass>.csv` として残ります（例: `results_pair.csv`）。  
-`--diff-mode accum` など手法を明示した場合は、その手法だけ実行します。
+**hard の差分（hully より厚く）:**
 
-**ログ:** 一括実行はジョブ（動画×手法）ごとに次の3行だけ出します（`run_pipeline` の詳細ログはキャプチャして端末に流しません）。失敗時のみ末尾ログを短く表示します。単体の `run_pipeline.py` は従来どおり詳細表示（`--quiet` で要約のみにもできます）。
+- `--full-search` … デコードを full（全バリアント × 拡大1/2/3）。`--mid-search` で mid に落とせる
+- `--hard-sweeps` …
+  - 閾値・accum 窓を密に
+  - `pair_each_end=0`（全隣接ペア）
+  - fourier `band_radius=2`
+  - lockin/fourier 周波数: rate/2・半分に加え rate/4・3rate/4・50/60Hz（折り畳み）
+  - lockin `phase_steps` = 4/8/16
+  - **pair以外の数値スコア→grayデコード**（`accum_num` / `stat_*_num` / `lockin_num` / `fourier_num`）。固定 th 二値化パスと併記（比較用）
+- `--keep-frames 120` … 切り出しフレームを残す
+- `--save-diff-maps all` … 差分 PNG を全保存
+- ログ: `logs/pass_hully_hard.log` + `logs/pass_index.csv`
+- スマホ試読: `phone_try/<pass>/`（条件ごと accuracy 上位8 + ランダム4）
 
 ```text
-[12/150] target: r180_e250_f1.mp4
-[12/150] pass:   pair
-[12/150] result: OK
+[3/12] r180_e250_f1.mp4: OK (7200s, phone_png=2800)
 ```
 
 ```bash
-python R8/analyze_code/all_analyze.py
-python R8/analyze_code/all_analyze.py --diff-mode accum
-python R8/analyze_code/all_analyze.py --diff-mode fourier
-python R8/analyze_code/all_analyze.py --mid-search
-python R8/analyze_code/all_analyze.py --force-extract
+python R8/analyze_code/all_analyze_hard.py
+python R8/analyze_code/all_analyze_hard.py --mid-search
+python R8/analyze_code/all_analyze_hard.py -- --reuse-frames
+python R8/analyze_code/all_analyze_hard.py -- --keep-frames 0 --save-diff-maps top3
 ```
 
-サマリー: `R8/analyze_code/out/all_analyze_summary.csv`（`video`, `pass`, `manifest`, `status`, `exit_code`, `note`）  
-所要時間: `R8/analyze_code/out/all_analyze_timing.csv`（追記蓄積。`finished_at`, `video`, `pass`, `status`, `elapsed_sec`, `note`）
+サマリー: `R8/analyze_code/out_hard/all_analyze_hard_summary.csv`  
+所要時間: `R8/analyze_code/out_hard/all_analyze_hard_timing.csv`
 

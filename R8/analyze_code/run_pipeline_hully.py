@@ -64,18 +64,39 @@ from run_pipeline import (
     write_pair_accuracy_csv,
     write_results_csv,
 )
-from time_fft import resolve_target_freqs
+from time_fft import resolve_target_freqs, resolve_target_freqs_hard
 
-# (pass_label, diff_mode, stat_kind)
+# (pass_label, diff_mode, stat_kind, repr_mode)
 # lockin = d(t) 複素ロックイン / fourier = d(t) 帯付き FFT（別CSV）
-ALL_PASSES: Tuple[Tuple[str, str, str], ...] = (
-    ("pair", "pair", ""),
-    ("accum", "accum", ""),
-    ("stat_std", "stat", "std"),
-    ("stat_var", "stat", "var"),
-    ("lockin", "lockin", ""),
-    ("fourier", "fourier", ""),
+# repr_mode: binary=固定th二値化 / gray=数値スコア正規化グレースケール（hard の *_num）
+ALL_PASSES: Tuple[Tuple[str, str, str, str], ...] = (
+    ("pair", "pair", "", "binary"),
+    ("accum", "accum", "", "binary"),
+    ("stat_std", "stat", "std", "binary"),
+    ("stat_var", "stat", "var", "binary"),
+    ("lockin", "lockin", "", "binary"),
+    ("fourier", "fourier", "", "binary"),
 )
+
+# --hard-sweeps 時のみ追加: pair以外の数値スコア→grayデコード経路
+HARD_NUM_PASSES: Tuple[Tuple[str, str, str, str], ...] = (
+    ("accum_num", "accum", "", "gray"),
+    ("stat_std_num", "stat", "std", "gray"),
+    ("stat_var_num", "stat", "var", "gray"),
+    ("lockin_num", "lockin", "", "gray"),
+    ("fourier_num", "fourier", "", "gray"),
+)
+
+# --hard-sweeps 時の拡大スイープ（通常既定より密）
+HARD_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
+HARD_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32, 40)
+HARD_WINDOW_NS_ACCUM: Tuple[int, ...] = (2, 3, 4, 5, 6)
+HARD_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
+HARD_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 3, 4, 6, 8)
+HARD_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
+HARD_PAIR_EACH_END = 0  # 全隣接ペア
+HARD_FOURIER_BAND_RADIUS = 2
+HARD_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
 
 
 @dataclass(frozen=True)
@@ -85,6 +106,8 @@ class SweepKey:
     window_n: Optional[int]
     fft_target_hz: Optional[float]
     diff_threshold: int
+    phase_steps: Optional[int] = None
+    repr_mode: str = "binary"
 
 
 @dataclass
@@ -98,9 +121,15 @@ class Top3Candidate:
     frame_2: str
 
 
+def resolve_pass_list(ns: argparse.Namespace) -> Tuple[Tuple[str, str, str, str], ...]:
+    if bool(getattr(ns, "hard_sweeps", False)):
+        return ALL_PASSES + HARD_NUM_PASSES
+    return ALL_PASSES
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="R8 hully: sync -> 60 conditions -> d(t) once -> 5 passes in-process"
+        description="R8 hully: sync -> 60 conditions -> d(t) once -> passes in-process (6, or 11 with --hard-sweeps)"
     )
     p.add_argument("--video", type=str, required=True)
     p.add_argument("--out-dir", type=str, default="")
@@ -141,6 +170,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--window-ns", type=str, default="")
     p.add_argument("--diff-thresholds", type=str, default="")
     p.add_argument("--target-freqs", type=str, default="")
+    p.add_argument(
+        "--pair-each-end",
+        type=int,
+        default=PAIR_OUTPUT_EACH_END,
+        help=f"pair 時の先頭/末尾デコードペア数（既定: {PAIR_OUTPUT_EACH_END}。0=全ペア）",
+    )
+    p.add_argument(
+        "--hard-sweeps",
+        action="store_true",
+        help=(
+            "閾値・窓・全ペア・band_radius・周波数候補・lockin phase_steps を拡大し、"
+            "pair以外に数値スコア→grayデコード経路(*_num)も追加"
+            "（all_analyze_hard 用。デコード full は orchestrator 側）"
+        ),
+    )
     p.add_argument(
         "--fourier-band-radius",
         type=int,
@@ -195,39 +239,92 @@ def build_sweeps(
     ns: argparse.Namespace,
     meta: Optional[VideoNameMeta],
     fps: float,
+    repr_mode: str = "binary",
 ) -> Tuple[List[SweepKey], Tuple[float, ...]]:
+    hard = bool(getattr(ns, "hard_sweeps", False))
+    gray = repr_mode == "gray"
     target_freqs: Tuple[float, ...] = ()
     if diff_mode == "accum":
-        window_ns = parse_int_list(ns.window_ns, WINDOW_NS_ACCUM)
-        thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_ACCUM)
+        default_ns = HARD_WINDOW_NS_ACCUM if hard else WINDOW_NS_ACCUM
+        window_ns = parse_int_list(ns.window_ns, default_ns)
+        if gray:
+            thresholds: Tuple[int, ...] = (0,)
+        else:
+            default_th = HARD_DIFF_THRESHOLDS_ACCUM if hard else DIFF_THRESHOLDS_ACCUM
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
         sweeps = [
-            SweepKey(diff_mode, "", n, None, th)
+            SweepKey(diff_mode, "", n, None, th, repr_mode=repr_mode)
             for n in window_ns
             for th in thresholds
         ]
     elif diff_mode == "stat":
-        default_th = DIFF_THRESHOLDS_STAT_VAR if stat_kind == "var" else DIFF_THRESHOLDS_STAT_STD
-        thresholds = parse_int_list(ns.diff_thresholds, default_th)
-        sweeps = [SweepKey(diff_mode, stat_kind, None, None, th) for th in thresholds]
+        if gray:
+            thresholds = (0,)
+        elif hard:
+            default_th = (
+                HARD_DIFF_THRESHOLDS_STAT_VAR
+                if stat_kind == "var"
+                else HARD_DIFF_THRESHOLDS_STAT_STD
+            )
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
+        else:
+            default_th = DIFF_THRESHOLDS_STAT_VAR if stat_kind == "var" else DIFF_THRESHOLDS_STAT_STD
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
+        sweeps = [
+            SweepKey(diff_mode, stat_kind, None, None, th, repr_mode=repr_mode)
+            for th in thresholds
+        ]
     elif diff_mode in ("fourier", "lockin"):
-        thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_FOURIER)
+        if gray:
+            thresholds = (0,)
+        else:
+            default_th = HARD_DIFF_THRESHOLDS_FREQ if hard else DIFF_THRESHOLDS_FOURIER
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
         if ns.target_freqs.strip():
             target_freqs = parse_float_list(ns.target_freqs, ())
         elif meta is not None:
-            target_freqs = tuple(resolve_target_freqs(meta.rate_hz, fps))
+            resolver = resolve_target_freqs_hard if hard else resolve_target_freqs
+            target_freqs = tuple(resolver(meta.rate_hz, fps))
         else:
             raise SystemExit(
                 f"{diff_mode} には --target-freqs か rate_hz 付き動画名が必要です"
             )
+        if diff_mode == "lockin":
+            phase_list: Tuple[Optional[int], ...] = (
+                HARD_PHASE_STEPS if hard else (8,)
+            )
+            sweeps = [
+                SweepKey(diff_mode, "", None, freq, th, phase_steps=ps, repr_mode=repr_mode)
+                for freq in target_freqs
+                for th in thresholds
+                for ps in phase_list
+            ]
+        else:
+            sweeps = [
+                SweepKey(diff_mode, "", None, freq, th, repr_mode=repr_mode)
+                for freq in target_freqs
+                for th in thresholds
+            ]
+    else:
+        default_th = HARD_DIFF_THRESHOLDS_PAIR if hard else DIFF_THRESHOLDS_PAIR
+        thresholds = parse_int_list(ns.diff_thresholds, default_th)
         sweeps = [
-            SweepKey(diff_mode, "", None, freq, th)
-            for freq in target_freqs
+            SweepKey(diff_mode, "", None, None, th, repr_mode=repr_mode)
             for th in thresholds
         ]
-    else:
-        thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_PAIR)
-        sweeps = [SweepKey(diff_mode, "", None, None, th) for th in thresholds]
     return sweeps, target_freqs
+
+
+def resolve_pair_each_end(ns: argparse.Namespace) -> int:
+    if bool(getattr(ns, "hard_sweeps", False)) and int(ns.pair_each_end) == PAIR_OUTPUT_EACH_END:
+        return HARD_PAIR_EACH_END
+    return max(0, int(ns.pair_each_end))
+
+
+def resolve_fourier_band_radius(ns: argparse.Namespace) -> int:
+    if bool(getattr(ns, "hard_sweeps", False)) and int(ns.fourier_band_radius) == 1:
+        return HARD_FOURIER_BAND_RADIUS
+    return max(0, int(ns.fourier_band_radius))
 
 
 def generate_maps_for_sweep(
@@ -237,16 +334,32 @@ def generate_maps_for_sweep(
     pair_each_end: int,
     fourier_band_radius: int = 1,
 ) -> List[MapSpec]:
+    repr_mode = sweep.repr_mode if sweep.repr_mode in ("binary", "gray") else "binary"
     if sweep.diff_mode == "pair":
         return generate_pair_maps(d_stack, sweep.diff_threshold, pair_each_end)
     if sweep.diff_mode == "accum":
         assert sweep.window_n is not None
-        return generate_accum_maps(d_stack, sweep.window_n, sweep.diff_threshold, pair_each_end)
+        return generate_accum_maps(
+            d_stack,
+            sweep.window_n,
+            sweep.diff_threshold,
+            pair_each_end,
+            repr_mode=repr_mode,
+        )
     if sweep.diff_mode == "stat":
-        return generate_stat_maps(d_stack, sweep.stat_kind, sweep.diff_threshold)
+        return generate_stat_maps(
+            d_stack, sweep.stat_kind, sweep.diff_threshold, repr_mode=repr_mode
+        )
     if sweep.diff_mode == "lockin":
         assert sweep.fft_target_hz is not None
-        return generate_lockin_maps(d_stack, fps, sweep.fft_target_hz, sweep.diff_threshold)
+        return generate_lockin_maps(
+            d_stack,
+            fps,
+            sweep.fft_target_hz,
+            sweep.diff_threshold,
+            phase_steps=int(sweep.phase_steps) if sweep.phase_steps is not None else 8,
+            repr_mode=repr_mode,
+        )
     if sweep.diff_mode == "fourier":
         assert sweep.fft_target_hz is not None
         return generate_fourier_maps(
@@ -255,6 +368,7 @@ def generate_maps_for_sweep(
             sweep.fft_target_hz,
             sweep.diff_threshold,
             band_radius=fourier_band_radius,
+            repr_mode=repr_mode,
         )
     return []
 
@@ -320,7 +434,7 @@ def pick_top3_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]
 
     def sweep_id(c: Top3Candidate) -> Tuple[Any, ...]:
         s = c.sweep
-        return (s.diff_mode, s.stat_kind, s.window_n, s.fft_target_hz, s.diff_threshold, c.frame_1, c.frame_2)
+        return (s.diff_mode, s.stat_kind, s.window_n, s.fft_target_hz, s.diff_threshold, s.phase_steps, s.repr_mode, c.frame_1, c.frame_2)
 
     selected: List[Top3Candidate] = []
     used_ids: set[Tuple[Any, ...]] = set()
@@ -463,14 +577,27 @@ def main() -> None:
     kernel_candidates = resolve_kernel_candidates(search_mode)
     gt_path_str = str(gt_path.resolve())
 
+    pair_each_end = resolve_pair_each_end(ns)
+    fourier_band_radius = resolve_fourier_band_radius(ns)
+    if bool(getattr(ns, "hard_sweeps", False)):
+        log_info(
+            f"[INFO] hard-sweeps on: pair_each_end={pair_each_end} "
+            f"fourier_band_radius={fourier_band_radius} "
+            f"passes={len(resolve_pass_list(ns))} (incl. *_num gray)"
+        )
+
+    passes = resolve_pass_list(ns)
     pass_state: Dict[str, Dict[str, Any]] = {}
-    for pass_label, diff_mode, stat_kind in ALL_PASSES:
+    for pass_label, diff_mode, stat_kind, repr_mode in passes:
         results_csv, decode_csv, pair_accuracy_csv = pass_output_paths(out_root, pass_label)
-        sweeps, target_freqs = build_sweeps(diff_mode, stat_kind, ns, meta, fps)
+        sweeps, target_freqs = build_sweeps(
+            diff_mode, stat_kind, ns, meta, fps, repr_mode=repr_mode
+        )
         pass_state[pass_label] = {
             "pass_label": pass_label,
             "diff_mode": diff_mode,
             "stat_kind": stat_kind,
+            "repr_mode": repr_mode,
             "sweeps": sweeps,
             "target_freqs": target_freqs,
             "results_csv": results_csv,
@@ -482,9 +609,9 @@ def main() -> None:
         }
         log_info(
             f"[INFO] pass={pass_label} diff_mode={diff_mode} "
-            f"stat_kind={stat_kind or '-'} sweeps={len(sweeps)}"
+            f"stat_kind={stat_kind or '-'} repr={repr_mode} sweeps={len(sweeps)}"
             + (
-                f" band_radius={int(ns.fourier_band_radius)}"
+                f" band_radius={fourier_band_radius}"
                 if diff_mode == "fourier"
                 else ""
             )
@@ -522,12 +649,22 @@ def main() -> None:
         top3_pool: List[Top3Candidate] = []
         all_specs_for_save: List[MapSpec] = []
 
-        for pass_label, diff_mode, stat_kind in ALL_PASSES:
+        for pass_label, diff_mode, stat_kind, repr_mode in passes:
             state = pass_state[pass_label]
             sweeps: List[SweepKey] = state["sweeps"]
             folder_decode_rows: List[Dict[str, str]] = []
             sweep_candidates: List[
-                Tuple[Optional[int], Optional[float], int, Dict[str, str], List[Dict[str, str]], float, bool, int]
+                Tuple[
+                    Optional[int],
+                    Optional[float],
+                    int,
+                    Dict[str, str],
+                    List[Dict[str, str]],
+                    float,
+                    bool,
+                    int,
+                    int,
+                ]
             ] = []
             target_freqs: Tuple[float, ...] = state["target_freqs"]
             freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
@@ -541,8 +678,8 @@ def main() -> None:
                     d_stack,
                     sweep,
                     fps,
-                    PAIR_OUTPUT_EACH_END if diff_mode == "pair" else 0,
-                    fourier_band_radius=int(ns.fourier_band_radius),
+                    pair_each_end if diff_mode == "pair" else 0,
+                    fourier_band_radius=fourier_band_radius,
                 )
                 if ns.save_diff_maps == "all":
                     all_specs_for_save.extend(specs)
@@ -550,7 +687,8 @@ def main() -> None:
                 for spec_idx, spec in enumerate(specs):
                     task_key = (
                         f"{pass_label}:{sweep.diff_mode}:{sweep.stat_kind}:"
-                        f"{sweep.window_n}:{sweep.fft_target_hz}:{sweep.diff_threshold}:{spec_idx}"
+                        f"{sweep.window_n}:{sweep.fft_target_hz}:{sweep.diff_threshold}:"
+                        f"{sweep.phase_steps}:{sweep.repr_mode}:{spec_idx}"
                     )
                     pass_tasks.append(
                         {
@@ -583,6 +721,7 @@ def main() -> None:
                     sweep.window_n,
                     sweep.fft_target_hz,
                     sweep.diff_threshold,
+                    sweep.phase_steps,
                 )
                 results_by_sweep.setdefault(key, []).append(result)
 
@@ -603,7 +742,12 @@ def main() -> None:
 
             saved_paths: Dict[str, str] = {}
             for sweep in sweeps:
-                key = (sweep.window_n, sweep.fft_target_hz, sweep.diff_threshold)
+                key = (
+                    sweep.window_n,
+                    sweep.fft_target_hz,
+                    sweep.diff_threshold,
+                    sweep.phase_steps,
+                )
                 rows = results_by_sweep.get(key, [])
                 specs_for_sweep = [
                     spec
@@ -622,6 +766,11 @@ def main() -> None:
                 acc_all_str, _ = pixel_accuracy_for_folder(th_rows, folder_name)
                 acc_all_val = float(acc_all_str) if acc_all_str else float("-inf")
                 freq_rank = freq_rank_map.get(sweep.fft_target_hz, 0) if sweep.fft_target_hz is not None else 0
+                phase_rank = (
+                    {4: 0, 8: 1, 16: 2}.get(int(sweep.phase_steps), 9)
+                    if sweep.phase_steps is not None
+                    else 0
+                )
                 sweep_candidates.append(
                     (
                         sweep.window_n,
@@ -632,12 +781,13 @@ def main() -> None:
                         acc_all_val,
                         ok,
                         freq_rank,
+                        phase_rank,
                     )
                 )
 
             if sweep_candidates:
-                def _sort_key(item: Tuple[Any, ...]) -> Tuple[int, float, int, int, int, int]:
-                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank = item
+                def _sort_key(item: Tuple[Any, ...]) -> Tuple[int, float, int, int, int, int, int]:
+                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank, phase_rank = item
                     has_acc = acc != float("-inf")
                     return (
                         0 if has_acc else 1,
@@ -646,10 +796,11 @@ def main() -> None:
                         th,
                         win_n if win_n is not None else 0,
                         freq_rank,
+                        phase_rank,
                     )
 
                 sweep_candidates.sort(key=_sort_key)
-                best_window_n, best_fft_freq, best_th, best_dec, best_rows, _, best_ok, _ = sweep_candidates[0]
+                best_window_n, best_fft_freq, best_th, best_dec, best_rows, _, best_ok, _, _ = sweep_candidates[0]
             else:
                 best_window_n = best_fft_freq = best_th = None
                 best_dec = {}

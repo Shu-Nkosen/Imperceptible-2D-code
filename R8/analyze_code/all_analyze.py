@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from naming import VideoNameMeta, parse_video_name
+from git_auto_sync import auto_commit_and_push
 
 ALLOWED_RATES = {45, 60, 90, 120, 180}
 ALLOWED_EXPS = {250, 125, 60}
@@ -74,6 +75,11 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         "--no-mid-search",
         action="store_true",
         help="互換用（既定が fast のため何もしない）",
+    )
+    p.add_argument(
+        "--no-auto-git",
+        action="store_true",
+        help="終了時・動画ごとの自動 git commit/push を無効化",
     )
     p.add_argument(
         "pipeline_extra",
@@ -496,6 +502,9 @@ def main() -> int:
                 elapsed_sec=elapsed,
             )
 
+        if not ns.no_auto_git:
+            auto_commit_and_push(source="all_analyze", detail=video_path.name)
+
     write_summary(summary_path, results)
     ok_count = sum(1 for r in results if r.status == "OK")
     fail_count = len(results) - ok_count
@@ -503,6 +512,8 @@ def main() -> int:
         f"[INFO] finished: ok={ok_count} fail={fail_count} "
         f"summary={summary_path.resolve()} timing={timing_path.resolve()}"
     )
+    if not ns.no_auto_git:
+        auto_commit_and_push(source="all_analyze", detail="finished")
     return 0 if fail_count == 0 else 1
 
 

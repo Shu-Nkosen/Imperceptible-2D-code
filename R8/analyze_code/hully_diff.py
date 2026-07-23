@@ -1,4 +1,8 @@
-"""pair-diff 系列 d(t) から各種差分マップを生成（hully パイプライン用）。"""
+"""pair-diff 系列 d(t) から各種差分マップを生成（hully パイプライン用）。
+
+TODO(hully): pair以外は数値スコア→grayデコードの方が良ければ、
+hard の gray 経路を hully 既定にも適用する（現状 hully は binary+th のみ）。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -46,6 +50,15 @@ def _diff_to_rgb(increased, decreased, unchanged) -> np.ndarray:
     rgb[increased] = (0, 0, 0)
     rgb[decreased] = (0, 0, 0)
     return rgb
+
+
+def score_to_gray_rgb(score_map: np.ndarray) -> np.ndarray:
+    """連続スコアを 0..1 正規化し、高スコア=黒のグレースケール RGB にする。"""
+    from time_fft import normalize_score_map
+
+    norm = normalize_score_map(np.asarray(score_map, dtype=np.float32))
+    gray = ((1.0 - norm) * 255.0).astype(np.uint8)
+    return np.stack([gray, gray, gray], axis=-1)
 
 
 def save_map_png(rgb: np.ndarray, output_path: Path) -> None:
@@ -169,15 +182,23 @@ def generate_accum_maps(
     window_n: int,
     threshold: int,
     pair_each_end: int = 0,
+    repr_mode: str = "binary",
 ) -> List[MapSpec]:
     """窓ごと1枚の MapSpec（pair_each_end は無視。baseline 同様全窓）。"""
     _ = pair_each_end
-    th = float(threshold) / 255.0
-    subdir = f"rgb_max_accum_n{window_n}_th{threshold}"
+    mode = "gray" if repr_mode == "gray" else "binary"
+    if mode == "gray":
+        subdir = f"rgb_max_accum_n{window_n}_gray"
+    else:
+        subdir = f"rgb_max_accum_n{window_n}_th{threshold}"
     specs: List[MapSpec] = []
     for acc, t1, t2 in accum_maps_from_diff(d_stack, window_n):
-        inc, dec, unch = classify_scalar_map(acc, th)
-        rgb = _diff_to_rgb(inc, dec, unch)
+        if mode == "gray":
+            rgb = score_to_gray_rgb(acc)
+        else:
+            th = float(threshold) / 255.0
+            inc, dec, unch = classify_scalar_map(acc, th)
+            rgb = _diff_to_rgb(inc, dec, unch)
         specs.append(
             MapSpec(
                 rgb=rgb,
@@ -197,12 +218,20 @@ def generate_stat_maps(
     d_stack: np.ndarray,
     stat_kind: str,
     threshold: int,
+    repr_mode: str = "binary",
 ) -> List[MapSpec]:
-    th = float(threshold) / 255.0
-    subdir = f"rgb_max_stat_{stat_kind}_th{threshold}"
+    mode = "gray" if repr_mode == "gray" else "binary"
+    if mode == "gray":
+        subdir = f"rgb_max_stat_{stat_kind}_gray"
+    else:
+        subdir = f"rgb_max_stat_{stat_kind}_th{threshold}"
     stat_map = stat_map_from_diff(d_stack, stat_kind)
-    inc, dec, unch = classify_scalar_map(stat_map, th)
-    rgb = _diff_to_rgb(inc, dec, unch)
+    if mode == "gray":
+        rgb = score_to_gray_rgb(stat_map)
+    else:
+        th = float(threshold) / 255.0
+        inc, dec, unch = classify_scalar_map(stat_map, th)
+        rgb = _diff_to_rgb(inc, dec, unch)
     n = d_stack.shape[0]
     return [
         MapSpec(
@@ -224,17 +253,26 @@ def generate_lockin_maps(
     target_freq: float,
     threshold: int,
     phase_steps: int = 8,
+    repr_mode: str = "binary",
 ) -> List[MapSpec]:
     """d(t) への複素ロックイン振幅マップ。"""
     from time_fft import format_freq_label, normalize_score_map
 
-    th = float(threshold) / 255.0
+    mode = "gray" if repr_mode == "gray" else "binary"
     freq_label = format_freq_label(target_freq)
-    subdir = f"rgb_max_lockin_{freq_label}_th{threshold}"
-    score = lockin_map_from_diff(d_stack, fps, target_freq, phase_steps=phase_steps)
-    norm = normalize_score_map(score)
-    inc, dec, unch = classify_scalar_map(norm, th)
-    rgb = _diff_to_rgb(inc, dec, unch)
+    steps = max(1, int(phase_steps))
+    if mode == "gray":
+        subdir = f"rgb_max_lockin_{freq_label}_ps{steps}_gray"
+    else:
+        subdir = f"rgb_max_lockin_{freq_label}_ps{steps}_th{threshold}"
+    score = lockin_map_from_diff(d_stack, fps, target_freq, phase_steps=steps)
+    if mode == "gray":
+        rgb = score_to_gray_rgb(score)
+    else:
+        th = float(threshold) / 255.0
+        norm = normalize_score_map(score)
+        inc, dec, unch = classify_scalar_map(norm, th)
+        rgb = _diff_to_rgb(inc, dec, unch)
     n = d_stack.shape[0]
     return [
         MapSpec(
@@ -256,13 +294,17 @@ def generate_fourier_maps(
     target_freq: float,
     threshold: int,
     band_radius: int = 1,
+    repr_mode: str = "binary",
 ) -> List[MapSpec]:
     """d(t) への帯付き FFT スコアマップ（target 近傍 / noise floor）。"""
     from time_fft import build_score_map, format_freq_label, normalize_score_map
 
-    th = float(threshold) / 255.0
+    mode = "gray" if repr_mode == "gray" else "binary"
     freq_label = format_freq_label(target_freq)
-    subdir = f"rgb_max_fourier_{freq_label}_th{threshold}"
+    if mode == "gray":
+        subdir = f"rgb_max_fourier_{freq_label}_gray"
+    else:
+        subdir = f"rgb_max_fourier_{freq_label}_th{threshold}"
     score = build_score_map(
         d_stack,
         fps=fps,
@@ -270,9 +312,13 @@ def generate_fourier_maps(
         band_radius=band_radius,
         use_window=True,
     )
-    norm = normalize_score_map(score)
-    inc, dec, unch = classify_scalar_map(norm, th)
-    rgb = _diff_to_rgb(inc, dec, unch)
+    if mode == "gray":
+        rgb = score_to_gray_rgb(score)
+    else:
+        th = float(threshold) / 255.0
+        norm = normalize_score_map(score)
+        inc, dec, unch = classify_scalar_map(norm, th)
+        rgb = _diff_to_rgb(inc, dec, unch)
     n = d_stack.shape[0]
     return [
         MapSpec(

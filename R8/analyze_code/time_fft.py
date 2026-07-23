@@ -34,6 +34,29 @@ def resolve_target_freqs(rate_hz: int, camera_fps: float) -> List[float]:
     return freqs
 
 
+def _dedupe_freqs(freqs: List[float], tol_hz: float = 0.5) -> List[float]:
+    """近い周波数をまとめ、昇順で返す。"""
+    ordered = sorted(float(f) for f in freqs if f > 0.0)
+    unique: List[float] = []
+    for freq in ordered:
+        if any(abs(freq - kept) <= tol_hz for kept in unique):
+            continue
+        unique.append(freq)
+    return unique
+
+
+def resolve_target_freqs_hard(rate_hz: int, camera_fps: float) -> List[float]:
+    """hard 用: rate/2・半分に加え rate/4・3rate/4・蛍光灯50/60Hz（折り畳み）も候補にする。"""
+    base = list(resolve_target_freqs(rate_hz, camera_fps))
+    extras = [
+        alias_to_nyquist(rate_hz / 4.0, camera_fps),
+        alias_to_nyquist(3.0 * rate_hz / 4.0, camera_fps),
+        alias_to_nyquist(50.0, camera_fps),
+        alias_to_nyquist(60.0, camera_fps),
+    ]
+    return _dedupe_freqs(base + extras)
+
+
 def format_freq_label(freq_hz: float) -> str:
     """差分サブディレクトリ用ラベル（例: 30→f30, 22.5→f225）。"""
     return f"f{int(round(float(freq_hz) * 10))}"
