@@ -120,3 +120,6 @@ RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresh
 2026-07-23 22:27:23,r45_e250_f0.mp4,OK,3510.9,,hully_single_pass
 2026-07-23 23:26:30,r45_e250_f1.mp4,OK,3542.8,,hully_single_pass
 2026-07-24 00:24:15,r60_e60_f1.mp4,OK,3460.2,,hully_single_pass
+2026-07-24 00:27:04,r60_e250_f1.mp4,FAIL,164.8,"exit=1: lack_to_red_sync
+    raise RuntimeError(""SYNC detection failed (black->red not found). Try adjusting thresholds."")
+RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.",hully_single_pass
