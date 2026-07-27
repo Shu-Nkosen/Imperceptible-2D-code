@@ -11,6 +11,7 @@ R8/make_movie/slate_*.png
 R8/make_movie/manifests/
 R8/analyze_code/out/**/*.png
 R8/analyze_code/out_hard/**/*.png
+R8/analyze_code/out_mid/**/*.png
 
 
 

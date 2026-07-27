@@ -88,7 +88,7 @@ HARD_NUM_PASSES: Tuple[Tuple[str, str, str, str], ...] = (
 )
 
 # --hard-sweeps 時の拡大スイープ（通常既定より密）
-HARD_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
+HARD_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10)
 HARD_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32)
 HARD_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
 HARD_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
@@ -97,6 +97,17 @@ HARD_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
 HARD_PAIR_EACH_END = 0  # 全隣接ペア
 HARD_FOURIER_BAND_RADIUS = 2
 HARD_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
+
+# --mid-sweeps: hard 相当の手法＋*_num、ただし pair/閾値/phase を軽く（≈hully の数倍）
+MID_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10)
+MID_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (12, 16, 24, 32)
+MID_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
+MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
+MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4)
+MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 8, 12)
+MID_PAIR_EACH_END = 3
+MID_FOURIER_BAND_RADIUS = 2
+MID_PHASE_STEPS: Tuple[int, ...] = (8,)
 
 
 @dataclass(frozen=True)
@@ -121,15 +132,27 @@ class Top3Candidate:
     frame_2: str
 
 
-def resolve_pass_list(ns: argparse.Namespace) -> Tuple[Tuple[str, str, str, str], ...]:
+def resolve_sweep_profile(ns: argparse.Namespace) -> str:
+    """hard > mid > normal。両方指定時は hard 優先。"""
     if bool(getattr(ns, "hard_sweeps", False)):
+        return "hard"
+    if bool(getattr(ns, "mid_sweeps", False)):
+        return "mid"
+    return "normal"
+
+
+def resolve_pass_list(ns: argparse.Namespace) -> Tuple[Tuple[str, str, str, str], ...]:
+    if resolve_sweep_profile(ns) in ("hard", "mid"):
         return ALL_PASSES + HARD_NUM_PASSES
     return ALL_PASSES
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="R8 hully: sync -> 60 conditions -> d(t) once -> passes in-process (6, or 11 with --hard-sweeps)"
+        description=(
+            "R8 hully: sync -> 60 conditions -> d(t) once -> passes in-process "
+            "(6, or 11 with --hard-sweeps / --mid-sweeps)"
+        )
     )
     p.add_argument("--video", type=str, required=True)
     p.add_argument("--out-dir", type=str, default="")
@@ -161,9 +184,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--save-diff-maps",
         type=str,
-        choices=["top3", "all", "none"],
+        choices=["top3", "top5", "all", "none"],
         default="top3",
-        help="差分 PNG 保存方針（既定: top3）",
+        help="差分 PNG 保存方針（既定: top3。hard/mid は top5）",
     )
     p.add_argument("--mid-search", action="store_true")
     p.add_argument("--full-search", action="store_true")
@@ -183,6 +206,14 @@ def parse_args() -> argparse.Namespace:
             "閾値・窓・全ペア・band_radius・周波数候補・lockin phase_steps を拡大し、"
             "pair以外に数値スコア→grayデコード経路(*_num)も追加"
             "（all_analyze_hard 用。デコード mid/full は orchestrator 側）"
+        ),
+    )
+    p.add_argument(
+        "--mid-sweeps",
+        action="store_true",
+        help=(
+            "hard 相当の *_num と周波数候補を残しつつ、pair は先頭/末尾3・"
+            "閾値は間引き・phase_steps=8 のみ（all_analyze_mid 用）"
         ),
     )
     p.add_argument(
@@ -242,16 +273,26 @@ def build_sweeps(
     fps: float,
     repr_mode: str = "binary",
 ) -> Tuple[List[SweepKey], Tuple[float, ...]]:
-    hard = bool(getattr(ns, "hard_sweeps", False))
+    profile = resolve_sweep_profile(ns)
     gray = repr_mode == "gray"
     target_freqs: Tuple[float, ...] = ()
     if diff_mode == "accum":
-        default_ns = HARD_WINDOW_NS_ACCUM if hard else WINDOW_NS_ACCUM
+        if profile == "hard":
+            default_ns = HARD_WINDOW_NS_ACCUM
+        elif profile == "mid":
+            default_ns = MID_WINDOW_NS_ACCUM
+        else:
+            default_ns = WINDOW_NS_ACCUM
         window_ns = parse_int_list(ns.window_ns, default_ns)
         if gray:
             thresholds: Tuple[int, ...] = (0,)
         else:
-            default_th = HARD_DIFF_THRESHOLDS_ACCUM if hard else DIFF_THRESHOLDS_ACCUM
+            if profile == "hard":
+                default_th = HARD_DIFF_THRESHOLDS_ACCUM
+            elif profile == "mid":
+                default_th = MID_DIFF_THRESHOLDS_ACCUM
+            else:
+                default_th = DIFF_THRESHOLDS_ACCUM
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
         sweeps = [
             SweepKey(diff_mode, "", n, None, th, repr_mode=repr_mode)
@@ -261,11 +302,18 @@ def build_sweeps(
     elif diff_mode == "stat":
         if gray:
             thresholds = (0,)
-        elif hard:
+        elif profile == "hard":
             default_th = (
                 HARD_DIFF_THRESHOLDS_STAT_VAR
                 if stat_kind == "var"
                 else HARD_DIFF_THRESHOLDS_STAT_STD
+            )
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
+        elif profile == "mid":
+            default_th = (
+                MID_DIFF_THRESHOLDS_STAT_VAR
+                if stat_kind == "var"
+                else MID_DIFF_THRESHOLDS_STAT_STD
             )
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
         else:
@@ -279,21 +327,33 @@ def build_sweeps(
         if gray:
             thresholds = (0,)
         else:
-            default_th = HARD_DIFF_THRESHOLDS_FREQ if hard else DIFF_THRESHOLDS_FOURIER
+            if profile == "hard":
+                default_th = HARD_DIFF_THRESHOLDS_FREQ
+            elif profile == "mid":
+                default_th = MID_DIFF_THRESHOLDS_FREQ
+            else:
+                default_th = DIFF_THRESHOLDS_FOURIER
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
         if ns.target_freqs.strip():
             target_freqs = parse_float_list(ns.target_freqs, ())
         elif meta is not None:
-            resolver = resolve_target_freqs_hard if hard else resolve_target_freqs
+            resolver = (
+                resolve_target_freqs_hard
+                if profile in ("hard", "mid")
+                else resolve_target_freqs
+            )
             target_freqs = tuple(resolver(meta.rate_hz, fps))
         else:
             raise SystemExit(
                 f"{diff_mode} には --target-freqs か rate_hz 付き動画名が必要です"
             )
         if diff_mode == "lockin":
-            phase_list: Tuple[Optional[int], ...] = (
-                HARD_PHASE_STEPS if hard else (8,)
-            )
+            if profile == "hard":
+                phase_list: Tuple[Optional[int], ...] = HARD_PHASE_STEPS
+            elif profile == "mid":
+                phase_list = MID_PHASE_STEPS
+            else:
+                phase_list = (8,)
             sweeps = [
                 SweepKey(diff_mode, "", None, freq, th, phase_steps=ps, repr_mode=repr_mode)
                 for freq in target_freqs
@@ -307,7 +367,12 @@ def build_sweeps(
                 for th in thresholds
             ]
     else:
-        default_th = HARD_DIFF_THRESHOLDS_PAIR if hard else DIFF_THRESHOLDS_PAIR
+        if profile == "hard":
+            default_th = HARD_DIFF_THRESHOLDS_PAIR
+        elif profile == "mid":
+            default_th = MID_DIFF_THRESHOLDS_PAIR
+        else:
+            default_th = DIFF_THRESHOLDS_PAIR
         thresholds = parse_int_list(ns.diff_thresholds, default_th)
         sweeps = [
             SweepKey(diff_mode, "", None, None, th, repr_mode=repr_mode)
@@ -317,14 +382,22 @@ def build_sweeps(
 
 
 def resolve_pair_each_end(ns: argparse.Namespace) -> int:
-    if bool(getattr(ns, "hard_sweeps", False)) and int(ns.pair_each_end) == PAIR_OUTPUT_EACH_END:
-        return HARD_PAIR_EACH_END
+    profile = resolve_sweep_profile(ns)
+    if int(ns.pair_each_end) == PAIR_OUTPUT_EACH_END:
+        if profile == "hard":
+            return HARD_PAIR_EACH_END
+        if profile == "mid":
+            return MID_PAIR_EACH_END
     return max(0, int(ns.pair_each_end))
 
 
 def resolve_fourier_band_radius(ns: argparse.Namespace) -> int:
-    if bool(getattr(ns, "hard_sweeps", False)) and int(ns.fourier_band_radius) == 1:
-        return HARD_FOURIER_BAND_RADIUS
+    profile = resolve_sweep_profile(ns)
+    if int(ns.fourier_band_radius) == 1:
+        if profile == "hard":
+            return HARD_FOURIER_BAND_RADIUS
+        if profile == "mid":
+            return MID_FOURIER_BAND_RADIUS
     return max(0, int(ns.fourier_band_radius))
 
 
@@ -429,13 +502,25 @@ def _parse_acc(value: Any) -> float:
         return float("-inf")
 
 
-def pick_top3_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]:
-    if not candidates:
+def pick_top_n_candidates(
+    candidates: List[Top3Candidate], n: int = 3
+) -> List[Top3Candidate]:
+    if not candidates or n <= 0:
         return []
 
     def sweep_id(c: Top3Candidate) -> Tuple[Any, ...]:
         s = c.sweep
-        return (s.diff_mode, s.stat_kind, s.window_n, s.fft_target_hz, s.diff_threshold, s.phase_steps, s.repr_mode, c.frame_1, c.frame_2)
+        return (
+            s.diff_mode,
+            s.stat_kind,
+            s.window_n,
+            s.fft_target_hz,
+            s.diff_threshold,
+            s.phase_steps,
+            s.repr_mode,
+            c.frame_1,
+            c.frame_2,
+        )
 
     selected: List[Top3Candidate] = []
     used_ids: set[Tuple[Any, ...]] = set()
@@ -447,14 +532,14 @@ def pick_top3_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]
         used_ids.add(sweep_id(best))
 
     remaining = [c for c in candidates if sweep_id(c) not in used_ids]
-    if remaining and len(selected) < 3:
+    if remaining and len(selected) < n:
         best_acc = max(remaining, key=lambda c: c.accuracy)
         if best_acc.accuracy != float("-inf"):
             selected.append(best_acc)
             used_ids.add(sweep_id(best_acc))
 
     remaining = [c for c in candidates if sweep_id(c) not in used_ids]
-    if remaining and len(selected) < 3:
+    if remaining and len(selected) < n:
         remaining.sort(
             key=lambda c: (
                 c.accuracy if c.accuracy != float("-inf") else -1.0,
@@ -465,12 +550,31 @@ def pick_top3_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]
         for cand in remaining:
             if sweep_id(cand) in used_ids:
                 continue
-            if len(selected) >= 3:
+            if len(selected) >= n:
                 break
             selected.append(cand)
             used_ids.add(sweep_id(cand))
 
-    return selected[:3]
+    return selected[:n]
+
+
+def pick_top3_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]:
+    return pick_top_n_candidates(candidates, n=3)
+
+
+def save_top_maps(
+    cond_dir: Path,
+    folder_name: str,
+    picks: List[Top3Candidate],
+    out_root: Path,
+    saved_paths: Dict[str, str],
+) -> None:
+    _ = out_root
+    for pick in picks:
+        rel = relative_diff_path(folder_name, pick.spec)
+        out_path = cond_dir / pick.spec.diff_subdir / f"{pick.spec.pair_name}_{SCALE_TAG}.png"
+        save_map_png(pick.spec.rgb, out_path)
+        saved_paths[rel] = str(out_path.resolve())
 
 
 def save_top3_maps(
@@ -480,11 +584,7 @@ def save_top3_maps(
     out_root: Path,
     saved_paths: Dict[str, str],
 ) -> None:
-    for pick in picks:
-        rel = relative_diff_path(folder_name, pick.spec)
-        out_path = cond_dir / pick.spec.diff_subdir / f"{pick.spec.pair_name}_{SCALE_TAG}.png"
-        save_map_png(pick.spec.rgb, out_path)
-        saved_paths[rel] = str(out_path.resolve())
+    save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths)
 
 
 def save_all_maps(
@@ -580,9 +680,10 @@ def main() -> None:
 
     pair_each_end = resolve_pair_each_end(ns)
     fourier_band_radius = resolve_fourier_band_radius(ns)
-    if bool(getattr(ns, "hard_sweeps", False)):
+    profile = resolve_sweep_profile(ns)
+    if profile in ("hard", "mid"):
         log_info(
-            f"[INFO] hard-sweeps on: pair_each_end={pair_each_end} "
+            f"[INFO] {profile}-sweeps on: pair_each_end={pair_each_end} "
             f"fourier_band_radius={fourier_band_radius} "
             f"passes={len(resolve_pass_list(ns))} (incl. *_num gray)"
         )
@@ -898,10 +999,13 @@ def main() -> None:
 
         saved_paths_final: Dict[str, str] = {}
         picks: List[Top3Candidate] = []
-        if ns.save_diff_maps == "top3":
-            picks = pick_top3_candidates(top3_pool)
-            save_top3_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
-            log_info(f"[INFO] ({i+1}/{len(conditions)}) saved top3={len(picks)} diff PNGs")
+        top_n = {"top3": 3, "top5": 5}.get(str(ns.save_diff_maps), 0)
+        if top_n > 0:
+            picks = pick_top_n_candidates(top3_pool, n=top_n)
+            save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
+            log_info(
+                f"[INFO] ({i+1}/{len(conditions)}) saved top{top_n}={len(picks)} diff PNGs"
+            )
         elif ns.save_diff_maps == "all":
             save_all_maps(cond_dir, folder_name, all_specs_for_save, saved_paths_final)
             log_info(
@@ -919,7 +1023,7 @@ def main() -> None:
                     rel_hint = str(row.get("diff_image") or "")
                     if rel_hint and rel_hint not in saved_rels:
                         row["diff_image"] = ""
-                for pick in picks if ns.save_diff_maps == "top3" else []:
+                for pick in picks if top_n > 0 else []:
                     rel = relative_diff_path(folder_name, pick.spec)
                     for row in rows:
                         if row.get("folder") != folder_name:
@@ -937,8 +1041,6 @@ def main() -> None:
                             continue
                         f1 = row.get("frame_1", "")
                         f2 = row.get("frame_2", "")
-                        th = str(row.get("diff_threshold", ""))
-                        mode = row.get("diff_mode", "")
                         for rel in saved_rels:
                             if rel.startswith(f"{folder_name}/") and f1 in rel and f2 in rel:
                                 row["diff_image"] = rel
