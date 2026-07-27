@@ -89,8 +89,8 @@ HARD_NUM_PASSES: Tuple[Tuple[str, str, str, str], ...] = (
 
 # --hard-sweeps 時の拡大スイープ（通常既定より密）
 HARD_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
-HARD_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32, 40)
-HARD_WINDOW_NS_ACCUM: Tuple[int, ...] = (2, 3, 4, 5, 6)
+HARD_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32)
+HARD_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
 HARD_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
 HARD_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 3, 4, 6, 8)
 HARD_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)

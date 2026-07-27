@@ -22,21 +22,32 @@ def alias_to_nyquist(f_hz: float, sample_fps: float) -> float:
     return f
 
 
+# 折り畳み後に DC 付近になった候補は QR に効きにくいので除外
+MIN_TARGET_FREQ_HZ = 2.0
+
+
 def resolve_target_freqs(rate_hz: int, camera_fps: float) -> List[float]:
     """表示レートから第一候補とその半分の2周波数を返す。"""
     primary = alias_to_nyquist(rate_hz / 2.0, camera_fps)
-    if primary < 2.0:
+    if primary < MIN_TARGET_FREQ_HZ:
         primary = alias_to_nyquist(rate_hz / 4.0, camera_fps)
     secondary = primary / 2.0
-    freqs = [primary]
-    if abs(secondary - primary) > 0.5:
+    freqs = [primary] if primary >= MIN_TARGET_FREQ_HZ else []
+    if (
+        secondary >= MIN_TARGET_FREQ_HZ
+        and abs(secondary - primary) > 0.5
+    ):
         freqs.append(secondary)
     return freqs
 
 
-def _dedupe_freqs(freqs: List[float], tol_hz: float = 0.5) -> List[float]:
-    """近い周波数をまとめ、昇順で返す。"""
-    ordered = sorted(float(f) for f in freqs if f > 0.0)
+def _dedupe_freqs(
+    freqs: List[float],
+    tol_hz: float = 0.5,
+    min_hz: float = MIN_TARGET_FREQ_HZ,
+) -> List[float]:
+    """近い周波数をまとめ、昇順で返す。min_hz 未満はスキップ。"""
+    ordered = sorted(float(f) for f in freqs if f >= min_hz)
     unique: List[float] = []
     for freq in ordered:
         if any(abs(freq - kept) <= tol_hz for kept in unique):
@@ -46,7 +57,10 @@ def _dedupe_freqs(freqs: List[float], tol_hz: float = 0.5) -> List[float]:
 
 
 def resolve_target_freqs_hard(rate_hz: int, camera_fps: float) -> List[float]:
-    """hard 用: rate/2・半分に加え rate/4・3rate/4・蛍光灯50/60Hz（折り畳み）も候補にする。"""
+    """hard 用: rate/2・半分に加え rate/4・3rate/4・蛍光灯50/60Hz（折り畳み）も候補にする。
+
+    折り畳み後に MIN_TARGET_FREQ_HZ 未満（≈DC）になった候補はスキップする。
+    """
     base = list(resolve_target_freqs(rate_hz, camera_fps))
     extras = [
         alias_to_nyquist(rate_hz / 4.0, camera_fps),
