@@ -63,6 +63,7 @@ from run_pipeline import (
     write_csv,
     write_pair_accuracy_csv,
     write_results_csv,
+    write_results_sweep_csv,
 )
 from time_fft import resolve_target_freqs, resolve_target_freqs_hard
 
@@ -78,36 +79,41 @@ ALL_PASSES: Tuple[Tuple[str, str, str, str], ...] = (
     ("fourier", "fourier", "", "binary"),
 )
 
-# --hard-sweeps 時のみ追加: pair以外の数値スコア→grayデコード経路
+# --hard-sweeps / --mid-sweeps 時のみ追加: pair以外の数値スコア→grayデコード経路
+# stat_var_num は実績ほぼゼロのため入れない
 HARD_NUM_PASSES: Tuple[Tuple[str, str, str, str], ...] = (
     ("accum_num", "accum", "", "gray"),
     ("stat_std_num", "stat", "std", "gray"),
-    ("stat_var_num", "stat", "var", "gray"),
     ("lockin_num", "lockin", "", "gray"),
     ("fourier_num", "fourier", "", "gray"),
 )
 
 # --hard-sweeps 時の拡大スイープ（通常既定より密）
-HARD_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10)
+# pair / lockin / stat_std は th=2 を除外（実績ほぼゼロ）
+HARD_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 6, 8, 10)
 HARD_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32)
 HARD_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
-HARD_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
-HARD_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 3, 4, 6, 8)
+HARD_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
+HARD_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4, 8)  # th=3,6 除外
+# fourier の th=6/10/16 は残す（lockin 用は th=2 なし）
+HARD_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
 HARD_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (2, 4, 6, 8, 10, 12, 16)
 HARD_PAIR_EACH_END = 0  # 全隣接ペア
 HARD_FOURIER_BAND_RADIUS = 2
 HARD_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
 
-# --mid-sweeps: hard 相当の手法＋*_num、ただし pair/閾値/phase を軽く（≈hully の数倍）
-MID_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (2, 4, 6, 8, 10)
-MID_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (12, 16, 24, 32)
+# --mid-sweeps: hard 後継の主スイープ（日常解析用）
+# pair/lockin/accum/fourier は厚く、stat は薄く。decode は --mid-search（gray+median_otsu, k=3/5/7）
+MID_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 6, 8, 10, 12)
+MID_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32)
 MID_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
-MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
-MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2, 4)
-MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 8, 12)
-MID_PAIR_EACH_END = 3
+MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
+MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
+MID_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
+MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)  # th=2 なし、6/10/16 含む
+MID_PAIR_EACH_END = 20  # hully 既定と同水準（全ペアにはしない）
 MID_FOURIER_BAND_RADIUS = 2
-MID_PHASE_STEPS: Tuple[int, ...] = (8,)
+MID_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
 
 
 @dataclass(frozen=True)
@@ -151,7 +157,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "R8 hully: sync -> 60 conditions -> d(t) once -> passes in-process "
-            "(6, or 11 with --hard-sweeps / --mid-sweeps)"
+            "(6, or 10 with --hard-sweeps / --mid-sweeps)"
         )
     )
     p.add_argument("--video", type=str, required=True)
@@ -184,9 +190,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--save-diff-maps",
         type=str,
-        choices=["top3", "top5", "all", "none"],
+        choices=["top3", "top5", "per_pass", "all", "none"],
         default="top3",
-        help="差分 PNG 保存方針（既定: top3。hard/mid は top5）",
+        help=(
+            "差分 PNG 保存方針（既定: top3。"
+            "mid は per_pass=手法ごと代表1枚、hard は top5 など orchestrator 側）"
+        ),
     )
     p.add_argument("--mid-search", action="store_true")
     p.add_argument("--full-search", action="store_true")
@@ -205,15 +214,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "閾値・窓・全ペア・band_radius・周波数候補・lockin phase_steps を拡大し、"
             "pair以外に数値スコア→grayデコード経路(*_num)も追加"
-            "（all_analyze_hard 用。デコード mid/full は orchestrator 側）"
+            "（互換用。新規の主解析は --mid-sweeps）"
         ),
     )
     p.add_argument(
         "--mid-sweeps",
         action="store_true",
         help=(
-            "hard 相当の *_num と周波数候補を残しつつ、pair は先頭/末尾3・"
-            "閾値は間引き・phase_steps=8 のみ（all_analyze_mid 用）"
+            "hard 後継の主スイープ: pair±20・密 th・lockin phase 4/8/16・"
+            "*_num・hard 周波数候補（stat は薄め。all_analyze_mid 用）"
         ),
     )
     p.add_argument(
@@ -259,7 +268,8 @@ def load_rgb_frames(cond_dir: Path, count: int) -> List[np.ndarray]:
 
 
 def resolve_kernel_candidates(search_mode: str) -> List[int]:
-    # mid / full ともメディアンカーネル 3/5/7（fast のみ既定5）
+    # mid / full: kernel 3/5/7（mid 主解析の既定。fast のみ kernel=5）
+    # mid-search は variant gray+median_otsu・scale=1.0（full にはしない）
     if search_mode in ("mid", "full"):
         return list(MID_MEDIAN_KERNELS)
     return [5]
@@ -327,15 +337,25 @@ def build_sweeps(
         if gray:
             thresholds = (0,)
         else:
-            if profile == "hard":
-                default_th = HARD_DIFF_THRESHOLDS_FREQ
-            elif profile == "mid":
-                default_th = MID_DIFF_THRESHOLDS_FREQ
+            if diff_mode == "lockin":
+                if profile == "hard":
+                    default_th = HARD_DIFF_THRESHOLDS_LOCKIN
+                elif profile == "mid":
+                    default_th = MID_DIFF_THRESHOLDS_LOCKIN
+                else:
+                    default_th = DIFF_THRESHOLDS_FOURIER
             else:
-                default_th = DIFF_THRESHOLDS_FOURIER
+                if profile == "hard":
+                    default_th = HARD_DIFF_THRESHOLDS_FREQ
+                elif profile == "mid":
+                    default_th = MID_DIFF_THRESHOLDS_FREQ
+                else:
+                    default_th = DIFF_THRESHOLDS_FOURIER
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
         if ns.target_freqs.strip():
-            target_freqs = parse_float_list(ns.target_freqs, ())
+            from time_fft import filter_target_freqs
+
+            target_freqs = tuple(filter_target_freqs(parse_float_list(ns.target_freqs, ())))
         elif meta is not None:
             resolver = (
                 resolve_target_freqs_hard
@@ -558,6 +578,30 @@ def pick_top_n_candidates(
     return selected[:n]
 
 
+def pick_per_pass_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]:
+    """各 pass_label から代表1枚（decode success 優先、なければ accuracy 最大）。"""
+    if not candidates:
+        return []
+    by_pass: Dict[str, List[Top3Candidate]] = {}
+    for cand in candidates:
+        by_pass.setdefault(cand.pass_label, []).append(cand)
+
+    selected: List[Top3Candidate] = []
+    for pass_label in sorted(by_pass.keys()):
+        group = by_pass[pass_label]
+        successes = [c for c in group if c.success]
+        pool = successes if successes else group
+        best = max(
+            pool,
+            key=lambda c: (
+                c.accuracy if c.accuracy != float("-inf") else -1.0,
+                c.success,
+            ),
+        )
+        selected.append(best)
+    return selected
+
+
 def pick_top3_candidates(candidates: List[Top3Candidate]) -> List[Top3Candidate]:
     return pick_top_n_candidates(candidates, n=3)
 
@@ -625,12 +669,13 @@ def tag_decode_rows(
     return tagged
 
 
-def pass_output_paths(out_root: Path, pass_label: str) -> Tuple[Path, Path, Path]:
+def pass_output_paths(out_root: Path, pass_label: str) -> Tuple[Path, Path, Path, Path]:
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in pass_label)
     results_csv = out_root / f"results_{safe}.csv"
+    results_sweep_csv = out_root / f"results_sweeps_{safe}.csv"
     decode_csv = out_root / f"qr_decode_all_frames_{safe}.csv"
     pair_accuracy_csv = out_root / "pair_accuracy.csv"
-    return results_csv, decode_csv, pair_accuracy_csv
+    return results_csv, results_sweep_csv, decode_csv, pair_accuracy_csv
 
 
 def main() -> None:
@@ -691,7 +736,9 @@ def main() -> None:
     passes = resolve_pass_list(ns)
     pass_state: Dict[str, Dict[str, Any]] = {}
     for pass_label, diff_mode, stat_kind, repr_mode in passes:
-        results_csv, decode_csv, pair_accuracy_csv = pass_output_paths(out_root, pass_label)
+        results_csv, results_sweep_csv, decode_csv, pair_accuracy_csv = pass_output_paths(
+            out_root, pass_label
+        )
         sweeps, target_freqs = build_sweeps(
             diff_mode, stat_kind, ns, meta, fps, repr_mode=repr_mode
         )
@@ -703,9 +750,11 @@ def main() -> None:
             "sweeps": sweeps,
             "target_freqs": target_freqs,
             "results_csv": results_csv,
+            "results_sweep_csv": results_sweep_csv,
             "decode_csv": decode_csv,
             "pair_accuracy_csv": pair_accuracy_csv,
             "results": [],
+            "sweep_results": [],
             "all_decode_rows": [],
             "all_pair_accuracy_rows": [],
         }
@@ -766,10 +815,17 @@ def main() -> None:
                     bool,
                     int,
                     int,
+                    SweepKey,
+                    int,
+                    str,
+                    str,
+                    str,
                 ]
             ] = []
             target_freqs: Tuple[float, ...] = state["target_freqs"]
             freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
+            common_meta = format_common_meta(video_path.name, meta, fps)
+            repr_mode = str(state.get("repr_mode") or "binary")
 
             pass_tasks: List[Dict[str, object]] = []
             task_specs: Dict[str, MapSpec] = {}
@@ -851,11 +907,6 @@ def main() -> None:
                     sweep.phase_steps,
                 )
                 rows = results_by_sweep.get(key, [])
-                specs_for_sweep = [
-                    spec
-                    for tk, spec in task_specs.items()
-                    if task_sweeps.get(tk) == sweep
-                ]
                 specs_by_key = {
                     tk: spec for tk, spec in task_specs.items() if task_sweeps.get(tk) == sweep
                 }
@@ -867,12 +918,27 @@ def main() -> None:
                 ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
                 acc_all_str, _ = pixel_accuracy_for_folder(th_rows, folder_name)
                 acc_all_val = float(acc_all_str) if acc_all_str else float("-inf")
-                freq_rank = freq_rank_map.get(sweep.fft_target_hz, 0) if sweep.fft_target_hz is not None else 0
+                pixel_acc_all_s, pixel_acc_ok_s = pixel_accuracy_for_folder(th_rows, folder_name)
+                pixel_acc_best_s, best_f1_s, best_f2_s = best_accuracy_for_folder(
+                    th_rows, folder_name
+                )
+                freq_rank = (
+                    freq_rank_map.get(sweep.fft_target_hz, 0)
+                    if sweep.fft_target_hz is not None
+                    else 0
+                )
                 phase_rank = (
                     {4: 0, 8: 1, 16: 2}.get(int(sweep.phase_steps), 9)
                     if sweep.phase_steps is not None
                     else 0
                 )
+                method_s = str(dec_th.get("method", "") or "")
+                variant_s = parse_decode_variant(method_s) if method_s else ""
+                if ok:
+                    note_s = ""
+                else:
+                    note_s = str(dec_th.get("note") or "QR未検出") if dec_th else "デコード結果なし"
+                    variant_s = ""
                 sweep_candidates.append(
                     (
                         sweep.window_n,
@@ -884,12 +950,25 @@ def main() -> None:
                         ok,
                         freq_rank,
                         phase_rank,
+                        sweep,
+                        len(th_rows),
+                        pixel_acc_all_s,
+                        pixel_acc_ok_s,
+                        pixel_acc_best_s,
+                        best_f1_s,
+                        best_f2_s,
+                        method_s if ok else "",
+                        variant_s,
+                        note_s,
+                        str(dec_th.get("decoded_text", "") or "") if ok else "",
+                        str(dec_th.get("frame_1", "") or ""),
+                        str(dec_th.get("frame_2", "") or ""),
                     )
                 )
 
             if sweep_candidates:
                 def _sort_key(item: Tuple[Any, ...]) -> Tuple[int, float, int, int, int, int, int]:
-                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank, phase_rank = item
+                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank, phase_rank = item[:9]
                     has_acc = acc != float("-inf")
                     return (
                         0 if has_acc else 1,
@@ -902,12 +981,25 @@ def main() -> None:
                     )
 
                 sweep_candidates.sort(key=_sort_key)
-                best_window_n, best_fft_freq, best_th, best_dec, best_rows, _, best_ok, _, _ = sweep_candidates[0]
+                best_item = sweep_candidates[0]
+                best_window_n = best_item[0]
+                best_fft_freq = best_item[1]
+                best_th = best_item[2]
+                best_dec = best_item[3]
+                best_rows = best_item[4]
+                best_ok = best_item[6]
+                best_sweep_key = (
+                    best_item[9].window_n,
+                    best_item[9].fft_target_hz,
+                    best_item[9].diff_threshold,
+                    best_item[9].phase_steps,
+                )
             else:
                 best_window_n = best_fft_freq = best_th = None
                 best_dec = {}
                 best_rows = []
                 best_ok = False
+                best_sweep_key = None
 
             decode_note = ""
             if analyzed <= 0:
@@ -918,6 +1010,84 @@ def main() -> None:
             ]
             state["all_decode_rows"].extend(folder_decode_rows)
             write_csv(state["decode_csv"], state["all_decode_rows"])
+
+            # 条件×スイープ詳細（全スイープ）
+            state["sweep_results"] = [
+                r for r in state["sweep_results"] if r.get("folder") != folder_name
+            ]
+            for item in sweep_candidates:
+                (
+                    win_n,
+                    fft_freq,
+                    th,
+                    _dec,
+                    _rows,
+                    _acc,
+                    ok,
+                    _fr,
+                    _pr,
+                    sweep,
+                    n_maps,
+                    pac_all,
+                    pac_ok,
+                    pac_best,
+                    bf1,
+                    bf2,
+                    method_s,
+                    variant_s,
+                    note_s,
+                    decoded_text,
+                    df1,
+                    df2,
+                ) = item
+                adopted = (
+                    best_sweep_key is not None
+                    and (
+                        sweep.window_n,
+                        sweep.fft_target_hz,
+                        sweep.diff_threshold,
+                        sweep.phase_steps,
+                    )
+                    == best_sweep_key
+                )
+                sweep_row: Dict[str, Any] = {
+                    "folder": folder_name,
+                    "pass": pass_label,
+                    "adopted": "1" if adopted else "0",
+                    "decode_success": "1" if ok else "0",
+                    "decode_note": note_s if not decode_note else decode_note,
+                    "decode_variant": variant_s if ok and not decode_note else "",
+                    "diff_mode": diff_mode,
+                    "repr_mode": repr_mode,
+                    "window_n": "" if win_n is None else str(win_n),
+                    "stat_kind": stat_kind if diff_mode == "stat" else "",
+                    "fft_target_hz": "" if fft_freq is None else f"{fft_freq:.6f}",
+                    "diff_threshold": str(th),
+                    "phase_steps": (
+                        "" if sweep.phase_steps is None else str(sweep.phase_steps)
+                    ),
+                    "n_maps": str(n_maps),
+                    "pixel_acc_all": pac_all,
+                    "pixel_acc_ok": pac_ok,
+                    "pixel_acc_best": pac_best,
+                    "best_pair_frame_1": bf1,
+                    "best_pair_frame_2": bf2,
+                    "cond": i,
+                    "image": cond.get("image", ""),
+                    "channel": cond.get("channel", ""),
+                    "token": cond.get("token", ""),
+                    "intensity": cond.get("intensity", ""),
+                    "decode_decoded_text": decoded_text if ok and not decode_note else "",
+                    "decode_method": method_s if ok and not decode_note else "",
+                    "decode_frame_1": df1,
+                    "decode_frame_2": df2,
+                    "note": decode_note,
+                    "analysis_frames": analyzed,
+                    "extract_sec": f"{extract_sec:.6f}",
+                }
+                sweep_row.update(common_meta)
+                state["sweep_results"].append(sweep_row)
+            write_results_sweep_csv(state["results_sweep_csv"], state["sweep_results"])
 
             dec = best_dec
             pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(best_rows, folder_name)
@@ -962,18 +1132,7 @@ def main() -> None:
                 "analysis_frames": analyzed,
                 "extract_sec": f"{extract_sec:.6f}",
             }
-            if i == 0:
-                row.update(format_common_meta(video_path.name, meta, fps))
-            else:
-                row.update(
-                    {
-                        "video": "",
-                        "display_rate": "",
-                        "exposure": "",
-                        "fluorescent": "",
-                        "camera_fps": "",
-                    }
-                )
+            row.update(common_meta)
             state["results"].append(row)
             write_results_csv(state["results_csv"], state["results"])
 
@@ -999,14 +1158,21 @@ def main() -> None:
 
         saved_paths_final: Dict[str, str] = {}
         picks: List[Top3Candidate] = []
-        top_n = {"top3": 3, "top5": 5}.get(str(ns.save_diff_maps), 0)
-        if top_n > 0:
+        save_mode = str(ns.save_diff_maps)
+        top_n = {"top3": 3, "top5": 5}.get(save_mode, 0)
+        if save_mode == "per_pass":
+            picks = pick_per_pass_candidates(top3_pool)
+            save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
+            log_info(
+                f"[INFO] ({i+1}/{len(conditions)}) saved per_pass={len(picks)} diff PNGs"
+            )
+        elif top_n > 0:
             picks = pick_top_n_candidates(top3_pool, n=top_n)
             save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
             log_info(
                 f"[INFO] ({i+1}/{len(conditions)}) saved top{top_n}={len(picks)} diff PNGs"
             )
-        elif ns.save_diff_maps == "all":
+        elif save_mode == "all":
             save_all_maps(cond_dir, folder_name, all_specs_for_save, saved_paths_final)
             log_info(
                 f"[INFO] ({i+1}/{len(conditions)}) saved all diff PNGs={len(all_specs_for_save)}"
@@ -1023,7 +1189,9 @@ def main() -> None:
                     rel_hint = str(row.get("diff_image") or "")
                     if rel_hint and rel_hint not in saved_rels:
                         row["diff_image"] = ""
-                for pick in picks if top_n > 0 else []:
+                for pick in picks if picks else []:
+                    if pick.pass_label != pass_label:
+                        continue
                     rel = relative_diff_path(folder_name, pick.spec)
                     for row in rows:
                         if row.get("folder") != folder_name:
@@ -1035,7 +1203,7 @@ def main() -> None:
                             and row.get("diff_mode") == pick.sweep.diff_mode
                         ):
                             row["diff_image"] = rel
-                if ns.save_diff_maps == "all":
+                if save_mode == "all":
                     for row in rows:
                         if row.get("folder") != folder_name:
                             continue

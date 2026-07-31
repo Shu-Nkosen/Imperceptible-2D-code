@@ -20,7 +20,7 @@ ALLOWED_RATES = {45, 60, 90, 120, 180}
 ALLOWED_EXPS = {250, 125, 60}
 ALLOWED_FLUORO = {0, 1}
 
-# run_pipeline_hully の hard 時 pass 一覧（binary 6 + gray *_num 5）
+# run_pipeline_hully の hard 時 pass 一覧（binary 6 + gray *_num 4）
 HULLY_PASSES: Tuple[str, ...] = (
     "pair",
     "accum",
@@ -30,7 +30,6 @@ HULLY_PASSES: Tuple[str, ...] = (
     "fourier",
     "accum_num",
     "stat_std_num",
-    "stat_var_num",
     "lockin_num",
     "fourier_num",
 )
@@ -65,7 +64,7 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     p = argparse.ArgumentParser(
         description=(
             "R8/movie 内の動画を run_pipeline_hully で徹底解析する（out_hard）。"
-            "hully の全手法に加え、pair以外の数値スコア→grayデコード(*_num)も実行する。"
+            "hully の全手法に加え、pair以外の数値スコア→grayデコード(*_num: accum/stat_std/lockin/fourier)も実行する。"
             "--hard-sweeps + --mid-search で閾値・窓・全ペア・周波数・phase_steps を拡大する。"
             "フレーム PNG は既定削除、差分 PNG は条件あたり上位5枚。手法ごとのログと phone_try を作る。"
         )

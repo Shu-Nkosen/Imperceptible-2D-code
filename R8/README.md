@@ -257,17 +257,23 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | ファイル | 場所 | 1行の意味 |
 |----------|------|-----------|
 | `results.csv` | `out/<動画stem>/` | **条件1個**の要約（60行） |
-| `results_<pass>.csv` | 同上 / `out_hard/<stem>/` | hully / hard の手法別結果（`pair`/`accum`/`stat_std`/`stat_var`/`lockin`/`fourier`） |
-| `pair_accuracy.csv` | 同上 | **pair モード**で採用閾値のペア正解率（先頭＋末尾 / 条件。hard は全ペア） |
+| `results_<pass>.csv` | 同上 / `out_mid_MMDD/<stem>/` | **条件1行**の採用スイープ要約（可視化のざっくり用） |
+| `results_sweeps_<pass>.csv` | 同上 | **条件×スイープ1行**の詳細（decode成否・acc・th/freq/phase・採用フラグ。傾向分析の本命） |
+| `pair_accuracy.csv` | 同上 | **pair モード**で採用閾値のペア正解率（先頭＋末尾 / 条件） |
 | `qr_decode_all_frames.csv` | 同上 | **差分1枚（ペア/窓）** ごとのデコード詳細（全閾値スイープ含む） |
-| `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別デコード詳細 |
-| `all_analyze_hard_summary.csv` | `out_hard/` | **動画ごと**の成否サマリー（1本= hully 全手法1回） |
-| `all_analyze_hard_timing.csv` | `out_hard/` | **動画ごと**の所要時間（追記・蓄積） |
-| `logs/pass_hully_hard.log` | `out_hard/<stem>/` | hard 1本分の run_pipeline_hully 全ログ |
+| `qr_decode_all_frames_<pass>.csv` | 同上 | 手法別・マップ単位のデコード詳細 |
+| `all_analyze_mid_summary.csv` | `out_mid_MMDD/` | **動画ごと**の成否サマリー（主解析。MMDD=実行日） |
+| `all_analyze_mid_timing.csv` | `out_mid_MMDD/` | **動画ごと**の所要時間（追記・蓄積） |
+| `all_analyze_hard_summary.csv` | `out_hard/` | hard 一括の成否サマリー（互換・非推奨） |
+| `all_analyze_hard_timing.csv` | `out_hard/` | hard 一括の所要時間 |
+| `logs/pass_hully_mid.log` | `out_mid_MMDD/<stem>/` | mid 1本分の run_pipeline_hully 全ログ |
+| `logs/pass_hully_hard.log` | `out_hard/<stem>/` | hard 1本分のログ |
 | `logs/pass_index.csv` | 同上 | 手法ごとの目次（status / 時間 / phone_copied） |
-| `phone_try/<pass>/` | 同上 | スマホ試読用にコピーした差分 PNG（条件ごと高acc+ランダム） |
+| `phone_try/<pass>/` | 同上 | スマホ試読用差分 PNG（mid: pass 代表1枚） |
 
-`run_pipeline_hully` / `all_analyze_hard` は **1動画あたり全6手法**をまとめて実行。モード比較は `results_pair.csv` と `results_lockin.csv` / `results_fourier.csv` などを並べて見ます。
+`run_pipeline_hully` / `all_analyze_mid` は **1動画あたり 10 pass**（binary 6 + gray `*_num` 4）。日常の主解析は **mid**。
+
+傾向分析・図作成は **`results_sweeps_*.csv` を縦結合**するのが本命です（画像×チャネルヒートマップ、レート×手法、強度×手法、手法比較など）。`results_*.csv` は条件ごとの採用1行の要約用。
 
 ---
 
@@ -290,11 +296,14 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `pixel_acc_best` | 全ペア/窓のうち **最大** の画素一致率（0〜1）。GT 無しは空 |
 | `best_pair_frame_1` | `pixel_acc_best` を出したペア/窓の左端フレーム |
 | `best_pair_frame_2` | 同上・右端フレーム |
-| `video` | 動画ファイル名。**先頭行（cond 0）だけ**埋まる |
-| `display_rate` | 表示レート（例: `180 Hz`）。先頭行のみ |
-| `exposure` | 露光（例: `1/250`）。先頭行のみ |
-| `fluorescent` | `蛍光灯あり` / `蛍光灯なし`。先頭行のみ |
-| `camera_fps` | 動画から検出した fps（例: `59.940 fps`）。先頭行のみ |
+| `video` | 動画ファイル名（全行） |
+| `display_rate` | 表示レート（例: `180 Hz`） |
+| `exposure` | 露光（例: `1/250`） |
+| `fluorescent` | `蛍光灯あり` / `蛍光灯なし` |
+| `camera_fps` | 動画から検出した fps（例: `59.940 fps`） |
+| `rate_hz` | 表示レート数値（集計用、例: `45`） |
+| `exposure_denom` | 露光分母（例: `60` / `250`） |
+| `fluorescent_flag` | `0` / `1`（集計用） |
 | `cond` | 条件番号 0〜59 |
 | `image` | 画像名（`rice`, `ex` など） |
 | `channel` | チャネル（`R`, `G`, `B`, `X`=max, `I`=min） |
@@ -309,6 +318,24 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 | `extract_sec` | 切り出し区間の秒数（再利用時は 0） |
 
 **採用ルール:** 各条件で閾値（＋ accum なら窓長、fourier なら周波数）を総当たりし、**`pixel_acc_all` 最大**の組み合わせを1行に載せます（デコード失敗時も同様。同点ならデコード成功 → 小さい th → 小さい n）。
+
+---
+
+### `results_sweeps_<pass>.csv`（条件×スイープ詳細・傾向分析用）
+
+`run_pipeline_hully` が出力。**1行 = 1条件 × 1スイープ**（pair の多数ペアはスイープ内で集約済み）。ヒートマップ・レート×手法・強度×手法などはここから集計する。
+
+| 列 | 説明 |
+|----|------|
+| `pass` | 手法ラベル（`pair` / `lockin` / `fourier_num` など） |
+| `adopted` | `1` = その条件の `results_*.csv` に採用されたスイープ |
+| `decode_success` | `1` / `0`（そのスイープで QR が読めたか） |
+| `repr_mode` | `binary` / `gray` |
+| `phase_steps` | lockin の位相分割（他は空） |
+| `n_maps` | そのスイープ内のマップ数（pair ならペア数） |
+| その他 | `results_*.csv` と同系統（image/channel/intensity/rate_hz/acc など） |
+
+例: 画像×チャネルのデコード率は `groupby([pass, image, channel])['decode_success'].mean()`。条件あたり「どれか1スイープでも成功」なら `groupby(...).max()`。
 
 ---
 
@@ -387,50 +414,80 @@ CSV は **UTF-8（BOM付き / `utf-8-sig`）** で書き出しています。
 
 ---
 
-## 一括解析（all_analyze_hard・徹底検証）
+## 一括解析（all_analyze_mid・主プロファイル）
 
-`R8/movie` 内の命名規則に合う `*.mp4` を順番に解析します。1本失敗しても他は続行します。  
-出力先は既定で **`out_hard/`**（hully の `out/` とは分離）。
+日常の本解析は **mid**（`--mid-sweeps`）。hard は互換用で、新規実験の入口は mid。
 
-**自動 git:** `all_analyze.py` / `all_analyze_hully.py` / `all_analyze_hard.py` は、**動画ごと**および**全完了時**に `git add -A` → commit → push します（CSV 等。`out`/`out_hard` の PNG は `.gitignore`）。無効化は `--no-auto-git`。
+```bash
+python R8/analyze_code/all_analyze_mid.py
+```
+
+出力先既定: **`out_mid_MMDD/`**（`MMDD` は解析実行日。例: `out_mid_0731`）。1動画あたり binary 6 + `*_num` 4 = **10 pass**。
+
+**マップスイープ（`--mid-sweeps`）:**
+
+| 項目 | mid |
+|------|-----|
+| pair | 先頭/末尾 **20**、th `4,6,8,10,12` |
+| accum | 窓 3/5、th `8,12,16,20,24,32` |
+| lockin | th `4,6,8,10,12,16`、phase `4,8,16` |
+| fourier | th `4,6,8,10,12,16`、band_radius=2 |
+| stat_std | th `4,8,12`（薄いまま） |
+| stat_var | th `1,2`（薄い） |
+| 周波数 | hard 相当（rate/2 等。DC 2Hz未満は除外） |
+| *_num | `accum_num` / `stat_std_num` / `lockin_num` / `fourier_num`（`stat_var_num` なし） |
+
+**デコード（既定 `--mid-search`。full にはしない）:**
+
+- variant: `gray`, `median_otsu`
+- median kernel: **3, 5, 7**
+- scale: **1.0 のみ**
+
+**保存:**
+
+- 生フレーム: `--keep-frames 0`（削除）
+- 差分 PNG: `--save-diff-maps per_pass`（**手法ごと代表1枚**。decode success 優先、なければ acc 最大）
+- phone_try: pass ごと **top1 のみ**（random なし）
+
+```bash
+python R8/analyze_code/all_analyze_mid.py
+python R8/analyze_code/all_analyze_mid.py --full-search   # 非推奨寄り（重い）
+python R8/analyze_code/all_analyze_mid.py -- --save-diff-maps top5
+```
+
+サマリー: `R8/analyze_code/out_mid_MMDD/all_analyze_mid_summary.csv`  
+所要時間: `R8/analyze_code/out_mid_MMDD/all_analyze_mid_timing.csv`
+
+---
+
+## 一括解析（all_analyze_hard・互換／非推奨）
+
+出力先は既定で **`out_hard/`**。新規の主解析は mid を使う。
+
+**自動 git:** `all_analyze.py` / `all_analyze_hully.py` / `all_analyze_mid.py` / `all_analyze_hard.py` は、**動画ごと**および**全完了時**に `git add -A` → commit → push します（CSV 等。`out`/`out_mid*`/`out_hard` の PNG は `.gitignore`）。無効化は `--no-auto-git`。
 
 ```bash
 python R8/analyze_code/all_analyze_hard.py
 ```
 
-**中身:** 各動画について `run_pipeline_hully.py` を **1回**呼び、hully と同じ **全6手法**を実行します。
+**中身:** 各動画について `run_pipeline_hully.py` を **1回**呼び、10 pass（binary + `*_num`）を実行します。
 
-1. `pair`
-2. `accum`
-3. `stat_std`
-4. `stat_var`
-5. `lockin`（d(t) 複素ロックイン）
-6. `fourier`（d(t) 帯付き FFT）
+**hard の差分（mid より厚い／全ペア）:**
 
-**hard の差分（hully より厚く）:**
-
-- `--mid-search` … デコードを mid（既定。`--full-search` で全バリアント×拡大に上げられる）
+- `--mid-search` … デコードを mid（既定。`--full-search` で拡大可）
 - `--hard-sweeps` …
-  - 閾値・accum 窓を密に
   - `pair_each_end=0`（全隣接ペア）
+  - 閾値・accum 窓・lockin phase を密に
   - fourier `band_radius=2`
-  - lockin/fourier 周波数: rate/2・半分に加え rate/4・3rate/4・50/60Hz（折り畳み）
-  - lockin `phase_steps` = 4/8/16
-  - **pair以外の数値スコア→grayデコード**（`accum_num` / `stat_*_num` / `lockin_num` / `fourier_num`）。固定 th 二値化パスと併記（比較用）
-- `--keep-frames 120` … 切り出しフレームを残す
-- `--save-diff-maps all` … 差分 PNG を全保存
+  - 周波数: rate/2・半分に加え rate/4・3rate/4・50/60Hz（折り畳み）。DC 2Hz未満は除外
+  - **pair以外の `*_num`**（`stat_var_num` なし）
+- 既定: `--keep-frames 0`、`--save-diff-maps top5`
 - ログ: `logs/pass_hully_hard.log` + `logs/pass_index.csv`
-- スマホ試読: `phone_try/<pass>/`（条件ごと accuracy 上位8 + ランダム4）
-
-```text
-[3/12] r180_e250_f1.mp4: OK (7200s, phone_png=2800)
-```
+- phone_try: 条件ごと高 acc + ランダム（hard オーケストレータ既定）
 
 ```bash
 python R8/analyze_code/all_analyze_hard.py
-python R8/analyze_code/all_analyze_hard.py --full-search
 python R8/analyze_code/all_analyze_hard.py -- --reuse-frames
-python R8/analyze_code/all_analyze_hard.py -- --keep-frames 0 --save-diff-maps top3
 ```
 
 サマリー: `R8/analyze_code/out_hard/all_analyze_hard_summary.csv`  

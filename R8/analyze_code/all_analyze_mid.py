@@ -1,4 +1,4 @@
-"""中程度の一括解析: hard 相当の手法を軽量スイープで out_mid に残す。"""
+"""主解析用一括: hard 後継の mid スイープを out_mid_MMDD に残す。"""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,7 @@ ALLOWED_RATES = {45, 60, 90, 120, 180}
 ALLOWED_EXPS = {250, 125, 60}
 ALLOWED_FLUORO = {0, 1}
 
-# run_pipeline_hully の mid 時 pass 一覧（binary 6 + gray *_num 5）
+# run_pipeline_hully の mid 時 pass 一覧（binary 6 + gray *_num 4）
 HULLY_PASSES: Tuple[str, ...] = (
     "pair",
     "accum",
@@ -30,7 +30,6 @@ HULLY_PASSES: Tuple[str, ...] = (
     "fourier",
     "accum_num",
     "stat_std_num",
-    "stat_var_num",
     "lockin_num",
     "fourier_num",
 )
@@ -48,8 +47,8 @@ PASS_INDEX_FIELDS = (
     "note",
 )
 
-PHONE_TOP_PER_FOLDER = 3
-PHONE_RANDOM_PER_FOLDER = 2
+PHONE_TOP_PER_FOLDER = 1
+PHONE_RANDOM_PER_FOLDER = 0
 
 
 @dataclass(frozen=True)
@@ -64,11 +63,12 @@ class VideoRunResult:
 def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     p = argparse.ArgumentParser(
         description=(
-            "R8/movie 内の動画を run_pipeline_hully で中程度解析する（out_mid）。"
-            "hully の全手法に加え、pair以外の数値スコア→grayデコード(*_num)も実行する。"
-            "--mid-sweeps + --mid-search: pair は先頭/末尾3、閾値は間引き、phase_steps=8、"
-            "周波数候補は hard 相当（折り畳み後2Hz未満は除外）。"
-            "フレーム PNG は既定削除、差分 PNG は条件あたり上位5枚。手法ごとのログと phone_try を作る。"
+            "R8/movie 内の動画を run_pipeline_hully で主解析する（out_mid_MMDD）。"
+            "hard 後継: --mid-sweeps（pair±20・密 th・lockin phase 4/8/16・*_num）+ "
+            "--mid-search（gray+median_otsu, kernel 3/5/7, scale=1）。"
+            "生フレームは削除、差分 PNG は手法ごと代表1枚（per_pass）。"
+            "phone_try は pass ごと top1 のみ。"
+            "未指定時の出力先は実行日の out_mid_MMDD（例: out_mid_0731）。"
         )
     )
     p.add_argument("--movie-dir", type=str, default="")
@@ -77,7 +77,7 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         "--out-dir",
         type=str,
         default="",
-        help="run_pipeline_hully の --out-dir（未指定時: R8/analyze_code/out_mid）",
+        help="run_pipeline_hully の --out-dir（未指定時: R8/analyze_code/out_mid_MMDD、MMDD=実行日）",
     )
     p.add_argument(
         "--full-search",
@@ -111,10 +111,20 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     return ns, extra
 
 
+def default_out_dir_name(when: Optional[datetime] = None) -> str:
+    """実行日の out_mid_MMDD（例: out_mid_0731）。"""
+    stamp = when or datetime.now()
+    return f"out_mid_{stamp.strftime('%m%d')}"
+
+
 def default_paths() -> Tuple[Path, Path, Path]:
     script_dir = Path(__file__).resolve().parent
     r8_dir = script_dir.parent
-    return r8_dir / "movie", r8_dir / "make_movie" / "manifests", script_dir / "out_mid"
+    return (
+        r8_dir / "movie",
+        r8_dir / "make_movie" / "manifests",
+        script_dir / default_out_dir_name(),
+    )
 
 
 def is_valid_video_meta(meta: VideoNameMeta) -> bool:
@@ -176,14 +186,14 @@ def build_mid_args(
     full_search: bool,
     shared_extra: Sequence[str],
 ) -> List[str]:
-    """mid 既定: hully 全手法 + mid-sweeps + mid-search。差分 PNG は条件あたり上位5枚。"""
+    """mid 既定: hard 後継スイープ + mid-search。差分 PNG は pass ごと代表1枚。"""
     extra = list(shared_extra)
     if not has_cli_flag(extra, "--workers"):
         extra = ["--workers", "16", *extra]
     if not has_cli_flag(extra, "--keep-frames"):
         extra = ["--keep-frames", "0", *extra]
     if not has_cli_flag(extra, "--save-diff-maps"):
-        extra = ["--save-diff-maps", "top5", *extra]
+        extra = ["--save-diff-maps", "per_pass", *extra]
     if "--mid-sweeps" not in extra and "--hard-sweeps" not in extra:
         extra = ["--mid-sweeps", *extra]
     if not has_cli_flag(extra, "--mid-search") and not has_cli_flag(extra, "--full-search"):
@@ -234,7 +244,7 @@ def collect_phone_samples(
     random_n: int = PHONE_RANDOM_PER_FOLDER,
     rng: Optional[random.Random] = None,
 ) -> int:
-    """条件ごとに高acc+ランダムの差分PNGを phone_try/{pass}/ にコピー。"""
+    """条件ごとに pass 代表差分 PNG を phone_try/{pass}/ にコピー（既定 top1）。"""
     safe = pass_safe_label(pass_label)
     decode_csv = out_root / f"qr_decode_all_frames_{safe}.csv"
     if not decode_csv.exists():
@@ -476,8 +486,9 @@ def main() -> int:
 
     videos, rejected = discover_videos(movie_dir)
     print(
-        f"[INFO] mid: videos={len(videos)} rejected={len(rejected)} "
-        f"pipeline=hully+mid-sweeps+mid-search passes={list(HULLY_PASSES)} out={default_out}"
+        f"[INFO] mid(primary): videos={len(videos)} rejected={len(rejected)} "
+        f"pipeline=hully+mid-sweeps+mid-search+per_pass "
+        f"passes={list(HULLY_PASSES)} out={default_out}"
     )
     if rejected:
         print("[WARN] skipped (invalid name):")

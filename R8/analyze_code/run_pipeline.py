@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from naming import VideoNameMeta, parse_video_name
-from time_fft import format_freq_label, resolve_target_freqs
+from time_fft import filter_target_freqs, format_freq_label, resolve_target_freqs
 
 _QUIET = False
 
@@ -450,21 +450,30 @@ def format_common_meta(
     meta: Optional[VideoNameMeta],
     fps: float,
 ) -> Dict[str, str]:
-    """先頭行だけに書く共通メタ（単位・言葉付き）。"""
+    """動画共通メタ（単位付き表示列 + 集計用の数値列）。"""
     if meta is not None:
         display_rate = f"{meta.rate_hz} Hz"
         exposure = f"1/{meta.exp}"
         fluorescent = "蛍光灯あり" if meta.fluoro == 1 else "蛍光灯なし"
+        rate_hz = str(meta.rate_hz)
+        exposure_denom = str(meta.exp)
+        fluorescent_flag = str(meta.fluoro)
     else:
         display_rate = ""
         exposure = ""
         fluorescent = ""
+        rate_hz = ""
+        exposure_denom = ""
+        fluorescent_flag = ""
     return {
         "video": video_name,
         "display_rate": display_rate,
         "exposure": exposure,
         "fluorescent": fluorescent,
         "camera_fps": f"{fps:.3f} fps",
+        "rate_hz": rate_hz,
+        "exposure_denom": exposure_denom,
+        "fluorescent_flag": fluorescent_flag,
     }
 
 
@@ -488,6 +497,52 @@ RESULTS_FIELDNAMES: Tuple[str, ...] = (
     "exposure",
     "fluorescent",
     "camera_fps",
+    "rate_hz",
+    "exposure_denom",
+    "fluorescent_flag",
+    "cond",
+    "image",
+    "channel",
+    "token",
+    "intensity",
+    "decode_decoded_text",
+    "decode_method",
+    "decode_frame_1",
+    "decode_frame_2",
+    "note",
+    "analysis_frames",
+    "extract_sec",
+)
+
+# 条件×スイープ詳細（可視化・傾向分析用。1行=1条件×1スイープ）
+RESULTS_SWEEP_FIELDNAMES: Tuple[str, ...] = (
+    "folder",
+    "pass",
+    "adopted",
+    "decode_success",
+    "decode_note",
+    "decode_variant",
+    "diff_mode",
+    "repr_mode",
+    "window_n",
+    "stat_kind",
+    "fft_target_hz",
+    "diff_threshold",
+    "phase_steps",
+    "n_maps",
+    "pixel_acc_all",
+    "pixel_acc_ok",
+    "pixel_acc_best",
+    "best_pair_frame_1",
+    "best_pair_frame_2",
+    "video",
+    "display_rate",
+    "exposure",
+    "fluorescent",
+    "camera_fps",
+    "rate_hz",
+    "exposure_denom",
+    "fluorescent_flag",
     "cond",
     "image",
     "channel",
@@ -721,6 +776,11 @@ def write_results_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     write_csv(path, rows, fieldnames=list(RESULTS_FIELDNAMES))
 
 
+def write_results_sweep_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+    """条件×スイープ詳細 results_sweeps_*.csv（可視化・傾向分析用）。"""
+    write_csv(path, rows, fieldnames=list(RESULTS_SWEEP_FIELDNAMES))
+
+
 def write_pair_accuracy_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
     """採用閾値でのペア別正解率 pair_accuracy.csv。"""
     write_csv(path, rows, fieldnames=list(PAIR_ACCURACY_FIELDNAMES))
@@ -881,7 +941,7 @@ def main() -> None:
         window_ns = ()
         diff_thresholds = parse_int_list(ns.diff_thresholds, DIFF_THRESHOLDS_FOURIER)
         if ns.target_freqs.strip():
-            target_freqs = parse_float_list(ns.target_freqs, ())
+            target_freqs = tuple(filter_target_freqs(list(parse_float_list(ns.target_freqs, ()))))
         elif meta is not None:
             target_freqs = tuple(resolve_target_freqs(meta.rate_hz, fps))
         else:
@@ -1245,19 +1305,7 @@ def main() -> None:
             "analysis_frames": analyzed,
             "extract_sec": f"{extract_sec:.6f}",
         }
-        # 共通メタは先頭行だけ（単位・言葉付き）
-        if i == 0:
-            row.update(format_common_meta(video_path.name, meta, fps))
-        else:
-            row.update(
-                {
-                    "video": "",
-                    "display_rate": "",
-                    "exposure": "",
-                    "fluorescent": "",
-                    "camera_fps": "",
-                }
-            )
+        row.update(format_common_meta(video_path.name, meta, fps))
 
         results.append(row)
 
