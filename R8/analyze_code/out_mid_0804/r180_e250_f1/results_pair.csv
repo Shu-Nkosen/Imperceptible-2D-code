@@ -1,0 +1,2 @@
+﻿folder,decode_note,decode_variant,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold,pixel_acc_all,pixel_acc_ok,pixel_acc_best,best_pair_frame_1,best_pair_frame_2,video,display_rate,exposure,fluorescent,camera_fps,rate_hz,exposure_denom,fluorescent_flag,cond,image,channel,token,intensity,decode_decoded_text,decode_method,decode_frame_1,decode_frame_2,note,analysis_frames,extract_sec
+rice_R_4,extract失敗: 0 frames,,pair,,,,4,,,,,,r180_e250_f1.mp4,180 Hz,1/250,蛍光灯あり,58.849 fps,180,250,1,0,rice,R,R,4,,,,,extract失敗: 0 frames,0,0.000000
