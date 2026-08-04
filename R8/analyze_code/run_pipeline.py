@@ -37,9 +37,10 @@ class SyncConfig:
     min_black_frames: int = 5
     min_red_frames: int = 3
     black_v_max: float = 0.4  # HSV V threshold
-    red_r_min: float = 0.6    # normalized mean R threshold
-    red_g_max: float = 0.3
-    red_b_max: float = 0.3
+    # カメラ露光で赤スレートが白飛びしても拾えるよう、G/B 上限を緩め、R 優位も要求する
+    red_r_min: float = 0.55   # normalized mean R threshold
+    red_g_max: float = 0.50
+    red_b_max: float = 0.45
 
 
 def parse_args() -> argparse.Namespace:
@@ -187,7 +188,13 @@ def is_black(frame: np.ndarray, cfg: SyncConfig) -> bool:
 
 def is_red(frame: np.ndarray, cfg: SyncConfig) -> bool:
     b, g, r = frame_means_bgr(frame)
-    return (r >= cfg.red_r_min) and (g <= cfg.red_g_max) and (b <= cfg.red_b_max)
+    return (
+        (r >= cfg.red_r_min)
+        and (g <= cfg.red_g_max)
+        and (b <= cfg.red_b_max)
+        and (r > g)
+        and (r > b)
+    )
 
 
 def detect_black_to_red_sync(video_path: Path, cfg: SyncConfig) -> Tuple[int, float]:
