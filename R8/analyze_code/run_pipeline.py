@@ -34,10 +34,10 @@ def log_warn(msg: str) -> None:
 
 @dataclass(frozen=True)
 class SyncConfig:
-    min_black_frames: int = 5
-    min_red_frames: int = 3
-    black_v_max: float = 0.3  # HSV V threshold
-    red_r_min: float = 0.6    # normalized mean R threshold
+    min_black_frames: int = 3
+    min_red_frames: int = 2
+    black_v_max: float = 0.4  # HSV V threshold
+    red_r_min: float = 0.4    # normalized mean R threshold
     red_g_max: float = 0.25
     red_b_max: float = 0.25
 

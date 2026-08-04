@@ -1,3 +1,8 @@
 ﻿finished_at,video,status,elapsed_sec,note,phone_copied_total
 2026-08-04 15:04:45,r180_e250_f1.mp4,FAIL,24.0,run_pipeline_hully exit=1,0
 2026-08-04 15:06:25,r180_e250_f1.mp4,FAIL,7.0,run_pipeline_hully exit=1,0
+2026-08-04 15:06:57,r180_e250_f1.mp4,FAIL,7.5,run_pipeline_hully exit=1,0
+2026-08-04 15:07:43,r180_e250_f1.mp4,FAIL,7.1,run_pipeline_hully exit=1,0
+2026-08-04 15:07:55,r180_e250_f1.mp4,FAIL,6.9,run_pipeline_hully exit=1,0
+2026-08-04 15:08:44,r180_e250_f1.mp4,FAIL,7.0,run_pipeline_hully exit=1,0
+2026-08-04 15:09:05,r180_e250_f1.mp4,FAIL,8.3,run_pipeline_hully exit=1,0
