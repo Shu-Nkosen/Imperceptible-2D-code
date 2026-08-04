@@ -39,8 +39,8 @@ class SyncConfig:
     black_v_max: float = 0.4  # HSV V threshold
     # カメラ露光で赤スレートが白飛びしても拾えるよう、G/B 上限を緩め、R 優位も要求する
     red_r_min: float = 0.55   # normalized mean R threshold
-    red_g_max: float = 0.50
-    red_b_max: float = 0.45
+    red_g_max: float = 0.4
+    red_b_max: float = 0.4
 
 
 def parse_args() -> argparse.Namespace:
