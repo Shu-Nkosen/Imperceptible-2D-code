@@ -1,50 +1,10 @@
-[OK] SYNC at frame=852, fps=58.8487
-[INFO] GT QR slot=start start_sec_from_sync=5.500 dur=3.000 samples_ok=3
-[INFO] GT QR slot=mid start_sec_from_sync=188.500 dur=3.000 samples_ok=0
-[INFO] GT QR slot=end start_sec_from_sync=371.500 dur=3.000 samples_ok=0
-[OK] wrote GT mask: C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\out_mid_0804\r180_e250_f1\frame_QR.png (from 3 samples)
-[INFO] mid-sweeps on: pair_each_end=20 fourier_band_radius=2 passes=10 (incl. *_num gray)
-[INFO] pass=pair diff_mode=pair stat_kind=- repr=binary sweeps=5
-[INFO] pass=accum diff_mode=accum stat_kind=- repr=binary sweeps=12
-[INFO] pass=stat_std diff_mode=stat stat_kind=std repr=binary sweeps=3
-[INFO] pass=stat_var diff_mode=stat stat_kind=var repr=binary sweeps=2
-[INFO] pass=lockin diff_mode=lockin stat_kind=- repr=binary sweeps=72
-[INFO] pass=fourier diff_mode=fourier stat_kind=- repr=binary sweeps=24 band_radius=2
-[INFO] pass=accum_num diff_mode=accum stat_kind=- repr=gray sweeps=2
-[INFO] pass=stat_std_num diff_mode=stat stat_kind=std repr=gray sweeps=1
-[INFO] pass=lockin_num diff_mode=lockin stat_kind=- repr=gray sweeps=12
-[INFO] pass=fourier_num diff_mode=fourier stat_kind=- repr=gray sweeps=4 band_radius=2
-[INFO] (1/60) extract rice_R_4: frames=0
-[INFO] (1/60) deleted 0 frame PNGs (keep-frames=0)
-
-C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\gpu_ops.py:141: UserWarning: std(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel). (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\aten\src\ATen\native\ReduceOps.cpp:1861.)
-  out = t.std(dim=0, unbiased=False)
-concurrent.futures.process._RemoteTraceback: 
-"""
-Traceback (most recent call last):
-  File "C:\Users\visu2\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\process.py", line 254, in _process_worker
-    r = call_item.fn(*call_item.args, **call_item.kwargs)
-  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\decode_qr_from_all_frames.py", line 657, in process_array_task
-    img_for_gt = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-cv2.error: OpenCV(4.13.0) D:\a\opencv-python\opencv-python\opencv\modules\imgproc\src\color.cpp:199: error: (-215:Assertion failed) !_src.empty() in function 'cv::cvtColor'
-
-"""
-
-The above exception was the direct cause of the following exception:
-
 Traceback (most recent call last):
   File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline_hully.py", line 1228, in <module>
     main()
     ~~~~^^
-  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline_hully.py", line 869, in main
-    decode_results = run_decode_batch(pass_tasks, int(ns.workers))
-  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline_hully.py", line 491, in run_decode_batch
-    rows.append(future.result())
-                ~~~~~~~~~~~~~^^
-  File "C:\Users\visu2\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py", line 443, in result
-    return self.__get_result()
-           ~~~~~~~~~~~~~~~~~^^
-  File "C:\Users\visu2\AppData\Local\Python\pythoncore-3.14-64\Lib\concurrent\futures\_base.py", line 395, in __get_result
-    raise self._exception
-cv2.error: OpenCV(4.13.0) D:\a\opencv-python\opencv-python\opencv\modules\imgproc\src\color.cpp:199: error: (-215:Assertion failed) !_src.empty() in function 'cv::cvtColor'
-
+  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline_hully.py", line 703, in main
+    sync_frame, fps = detect_black_to_red_sync(video_path, cfg)
+                      ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline.py", line 233, in detect_black_to_red_sync
+    raise RuntimeError("SYNC detection failed (black->red not found). Try adjusting thresholds.")
+RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.

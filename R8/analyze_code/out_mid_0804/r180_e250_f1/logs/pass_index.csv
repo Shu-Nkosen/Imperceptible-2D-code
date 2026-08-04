@@ -1,11 +1,11 @@
 ﻿pass,status,elapsed_sec,log_path,results_csv,decode_csv,phone_copied,note
-pair,FAIL,24.0,logs\pass_hully_mid.log,results_pair.csv,qr_decode_all_frames_pair.csv,0,run_pipeline_hully exit=1
-accum,FAIL,24.0,logs\pass_hully_mid.log,results_accum.csv,qr_decode_all_frames_accum.csv,0,run_pipeline_hully exit=1
-stat_std,FAIL,24.0,logs\pass_hully_mid.log,results_stat_std.csv,qr_decode_all_frames_stat_std.csv,0,run_pipeline_hully exit=1
-stat_var,FAIL,24.0,logs\pass_hully_mid.log,results_stat_var.csv,qr_decode_all_frames_stat_var.csv,0,run_pipeline_hully exit=1
-lockin,FAIL,24.0,logs\pass_hully_mid.log,results_lockin.csv,qr_decode_all_frames_lockin.csv,0,run_pipeline_hully exit=1
-fourier,FAIL,24.0,logs\pass_hully_mid.log,results_fourier.csv,qr_decode_all_frames_fourier.csv,0,run_pipeline_hully exit=1
-accum_num,FAIL,24.0,logs\pass_hully_mid.log,results_accum_num.csv,qr_decode_all_frames_accum_num.csv,0,run_pipeline_hully exit=1
-stat_std_num,FAIL,24.0,logs\pass_hully_mid.log,results_stat_std_num.csv,qr_decode_all_frames_stat_std_num.csv,0,run_pipeline_hully exit=1
-lockin_num,FAIL,24.0,logs\pass_hully_mid.log,results_lockin_num.csv,qr_decode_all_frames_lockin_num.csv,0,run_pipeline_hully exit=1
-fourier_num,FAIL,24.0,logs\pass_hully_mid.log,results_fourier_num.csv,qr_decode_all_frames_fourier_num.csv,0,run_pipeline_hully exit=1
+pair,FAIL,7.0,logs\pass_hully_mid.log,results_pair.csv,qr_decode_all_frames_pair.csv,0,run_pipeline_hully exit=1
+accum,FAIL,7.0,logs\pass_hully_mid.log,results_accum.csv,qr_decode_all_frames_accum.csv,0,run_pipeline_hully exit=1
+stat_std,FAIL,7.0,logs\pass_hully_mid.log,results_stat_std.csv,qr_decode_all_frames_stat_std.csv,0,run_pipeline_hully exit=1
+stat_var,FAIL,7.0,logs\pass_hully_mid.log,results_stat_var.csv,qr_decode_all_frames_stat_var.csv,0,run_pipeline_hully exit=1
+lockin,FAIL,7.0,logs\pass_hully_mid.log,results_lockin.csv,qr_decode_all_frames_lockin.csv,0,run_pipeline_hully exit=1
+fourier,FAIL,7.0,logs\pass_hully_mid.log,results_fourier.csv,qr_decode_all_frames_fourier.csv,0,run_pipeline_hully exit=1
+accum_num,FAIL,7.0,logs\pass_hully_mid.log,results_accum_num.csv,qr_decode_all_frames_accum_num.csv,0,run_pipeline_hully exit=1
+stat_std_num,FAIL,7.0,logs\pass_hully_mid.log,results_stat_std_num.csv,qr_decode_all_frames_stat_std_num.csv,0,run_pipeline_hully exit=1
+lockin_num,FAIL,7.0,logs\pass_hully_mid.log,results_lockin_num.csv,qr_decode_all_frames_lockin_num.csv,0,run_pipeline_hully exit=1
+fourier_num,FAIL,7.0,logs\pass_hully_mid.log,results_fourier_num.csv,qr_decode_all_frames_fourier_num.csv,0,run_pipeline_hully exit=1

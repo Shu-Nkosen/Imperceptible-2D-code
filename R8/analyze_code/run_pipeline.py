@@ -36,10 +36,10 @@ def log_warn(msg: str) -> None:
 class SyncConfig:
     min_black_frames: int = 5
     min_red_frames: int = 3
-    black_v_max: float = 0.4  # HSV V threshold
+    black_v_max: float = 0.3  # HSV V threshold
     red_r_min: float = 0.6    # normalized mean R threshold
-    red_g_max: float = 0.3
-    red_b_max: float = 0.3
+    red_g_max: float = 0.25
+    red_b_max: float = 0.25
 
 
 def parse_args() -> argparse.Namespace:
