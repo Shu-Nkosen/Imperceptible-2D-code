@@ -1,0 +1,5 @@
+﻿folder,frame_1,frame_2,diff_image,analysis_image,decoded_text,success,method,note,recall,precision,accuracy,noise,gt_note,task_key,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold
+rice_R_4,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.000000,0.000000,0.633029,0.000000,,stat_var:stat:var:None:None:1:None:binary:0,stat,,var,,1
+rice_R_4,frame_00000.png,frame_00119.png,rice_R_4/rgb_max_stat_var_th2/00000-00119-FRAME_rgbmax_scale1.00.png,,,0,decode失敗,QR未検出,0.000000,0.000000,0.633029,0.000000,,stat_var:stat:var:None:None:2:None:binary:0,stat,,var,,2
+rice_R_8,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.000000,0.000000,0.633029,0.000014,,stat_var:stat:var:None:None:1:None:binary:0,stat,,var,,1
+rice_R_8,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.000000,0.000000,0.633029,0.000000,,stat_var:stat:var:None:None:2:None:binary:0,stat,,var,,2
