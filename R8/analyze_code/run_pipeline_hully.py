@@ -102,18 +102,29 @@ HARD_PAIR_EACH_END = 0  # 全隣接ペア
 HARD_FOURIER_BAND_RADIUS = 2
 HARD_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
 
-# --mid-sweeps: hard 後継の主スイープ（日常解析用）
-# pair/lockin/accum/fourier は厚く、stat は薄く。decode は --mid-search（gray+median_otsu, k=3/5/7）
+# --mid-sweeps: 主解析（厚いスイープ。all_analyze_mid 用）
 MID_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 6, 8, 10, 12)
 MID_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32)
 MID_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
-MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
-MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
+MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
+MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)
 MID_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
-MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)  # th=2 なし、6/10/16 含む
-MID_PAIR_EACH_END = 20  # hully 既定と同水準（全ペアにはしない）
+MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
+MID_PAIR_EACH_END = 20
 MID_FOURIER_BAND_RADIUS = 2
 MID_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
+
+# --mid-fast-sweeps: 日常用（デコード枚数≈1/4 相当に間引き。all_analyze_mid_fast 用）
+MID_FAST_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 8, 12)
+MID_FAST_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 16, 24, 32)
+MID_FAST_WINDOW_NS_ACCUM: Tuple[int, ...] = (5,)
+MID_FAST_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
+MID_FAST_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
+MID_FAST_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 8, 12)
+MID_FAST_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 8, 12)
+MID_FAST_PAIR_EACH_END = 10
+MID_FAST_FOURIER_BAND_RADIUS = 2
+MID_FAST_PHASE_STEPS: Tuple[int, ...] = (8,)
 
 
 @dataclass(frozen=True)
@@ -139,16 +150,18 @@ class Top3Candidate:
 
 
 def resolve_sweep_profile(ns: argparse.Namespace) -> str:
-    """hard > mid > normal。両方指定時は hard 優先。"""
+    """hard > mid > mid_fast > normal。複数指定時は上位を優先。"""
     if bool(getattr(ns, "hard_sweeps", False)):
         return "hard"
     if bool(getattr(ns, "mid_sweeps", False)):
         return "mid"
+    if bool(getattr(ns, "mid_fast_sweeps", False)):
+        return "mid_fast"
     return "normal"
 
 
 def resolve_pass_list(ns: argparse.Namespace) -> Tuple[Tuple[str, str, str, str], ...]:
-    if resolve_sweep_profile(ns) in ("hard", "mid"):
+    if resolve_sweep_profile(ns) in ("hard", "mid", "mid_fast"):
         return ALL_PASSES + HARD_NUM_PASSES
     return ALL_PASSES
 
@@ -157,7 +170,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "R8 hully: sync -> 60 conditions -> d(t) once -> passes in-process "
-            "(6, or 10 with --hard-sweeps / --mid-sweeps)"
+            "(6, or 10 with --hard-sweeps / --mid-sweeps / --mid-fast-sweeps)"
         )
     )
     p.add_argument("--video", type=str, required=True)
@@ -221,8 +234,16 @@ def parse_args() -> argparse.Namespace:
         "--mid-sweeps",
         action="store_true",
         help=(
-            "hard 後継の主スイープ: pair±20・密 th・lockin phase 4/8/16・"
-            "*_num・hard 周波数候補（stat は薄め。all_analyze_mid 用）"
+            "主解析の厚い mid スイープ: pair±20・密 th・lockin phase 4/8/16・"
+            "*_num・hard 周波数候補（all_analyze_mid 用）"
+        ),
+    )
+    p.add_argument(
+        "--mid-fast-sweeps",
+        action="store_true",
+        help=(
+            "日常用の軽い mid スイープ: pair±10・間引き th・lockin phase=8・"
+            "*_num・hard 周波数候補（all_analyze_mid_fast 用）"
         ),
     )
     p.add_argument(
@@ -291,6 +312,8 @@ def build_sweeps(
             default_ns = HARD_WINDOW_NS_ACCUM
         elif profile == "mid":
             default_ns = MID_WINDOW_NS_ACCUM
+        elif profile == "mid_fast":
+            default_ns = MID_FAST_WINDOW_NS_ACCUM
         else:
             default_ns = WINDOW_NS_ACCUM
         window_ns = parse_int_list(ns.window_ns, default_ns)
@@ -301,6 +324,8 @@ def build_sweeps(
                 default_th = HARD_DIFF_THRESHOLDS_ACCUM
             elif profile == "mid":
                 default_th = MID_DIFF_THRESHOLDS_ACCUM
+            elif profile == "mid_fast":
+                default_th = MID_FAST_DIFF_THRESHOLDS_ACCUM
             else:
                 default_th = DIFF_THRESHOLDS_ACCUM
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -326,6 +351,13 @@ def build_sweeps(
                 else MID_DIFF_THRESHOLDS_STAT_STD
             )
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
+        elif profile == "mid_fast":
+            default_th = (
+                MID_FAST_DIFF_THRESHOLDS_STAT_VAR
+                if stat_kind == "var"
+                else MID_FAST_DIFF_THRESHOLDS_STAT_STD
+            )
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
         else:
             default_th = DIFF_THRESHOLDS_STAT_VAR if stat_kind == "var" else DIFF_THRESHOLDS_STAT_STD
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -342,6 +374,8 @@ def build_sweeps(
                     default_th = HARD_DIFF_THRESHOLDS_LOCKIN
                 elif profile == "mid":
                     default_th = MID_DIFF_THRESHOLDS_LOCKIN
+                elif profile == "mid_fast":
+                    default_th = MID_FAST_DIFF_THRESHOLDS_LOCKIN
                 else:
                     default_th = DIFF_THRESHOLDS_FOURIER
             else:
@@ -349,6 +383,8 @@ def build_sweeps(
                     default_th = HARD_DIFF_THRESHOLDS_FREQ
                 elif profile == "mid":
                     default_th = MID_DIFF_THRESHOLDS_FREQ
+                elif profile == "mid_fast":
+                    default_th = MID_FAST_DIFF_THRESHOLDS_FREQ
                 else:
                     default_th = DIFF_THRESHOLDS_FOURIER
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -359,7 +395,7 @@ def build_sweeps(
         elif meta is not None:
             resolver = (
                 resolve_target_freqs_hard
-                if profile in ("hard", "mid")
+                if profile in ("hard", "mid", "mid_fast")
                 else resolve_target_freqs
             )
             target_freqs = tuple(resolver(meta.rate_hz, fps))
@@ -372,6 +408,8 @@ def build_sweeps(
                 phase_list: Tuple[Optional[int], ...] = HARD_PHASE_STEPS
             elif profile == "mid":
                 phase_list = MID_PHASE_STEPS
+            elif profile == "mid_fast":
+                phase_list = MID_FAST_PHASE_STEPS
             else:
                 phase_list = (8,)
             sweeps = [
@@ -391,6 +429,8 @@ def build_sweeps(
             default_th = HARD_DIFF_THRESHOLDS_PAIR
         elif profile == "mid":
             default_th = MID_DIFF_THRESHOLDS_PAIR
+        elif profile == "mid_fast":
+            default_th = MID_FAST_DIFF_THRESHOLDS_PAIR
         else:
             default_th = DIFF_THRESHOLDS_PAIR
         thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -408,6 +448,8 @@ def resolve_pair_each_end(ns: argparse.Namespace) -> int:
             return HARD_PAIR_EACH_END
         if profile == "mid":
             return MID_PAIR_EACH_END
+        if profile == "mid_fast":
+            return MID_FAST_PAIR_EACH_END
     return max(0, int(ns.pair_each_end))
 
 
@@ -418,6 +460,8 @@ def resolve_fourier_band_radius(ns: argparse.Namespace) -> int:
             return HARD_FOURIER_BAND_RADIUS
         if profile == "mid":
             return MID_FOURIER_BAND_RADIUS
+        if profile == "mid_fast":
+            return MID_FAST_FOURIER_BAND_RADIUS
     return max(0, int(ns.fourier_band_radius))
 
 
@@ -726,7 +770,7 @@ def main() -> None:
     pair_each_end = resolve_pair_each_end(ns)
     fourier_band_radius = resolve_fourier_band_radius(ns)
     profile = resolve_sweep_profile(ns)
-    if profile in ("hard", "mid"):
+    if profile in ("hard", "mid", "mid_fast"):
         log_info(
             f"[INFO] {profile}-sweeps on: pair_each_end={pair_each_end} "
             f"fourier_band_radius={fourier_band_radius} "
