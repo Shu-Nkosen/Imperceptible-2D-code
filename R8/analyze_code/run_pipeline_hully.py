@@ -4,7 +4,12 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    Executor,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -102,18 +107,29 @@ HARD_PAIR_EACH_END = 0  # 全隣接ペア
 HARD_FOURIER_BAND_RADIUS = 2
 HARD_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
 
-# --mid-sweeps: hard 後継の主スイープ（日常解析用）
-# pair/lockin/accum/fourier は厚く、stat は薄く。decode は --mid-search（gray+median_otsu, k=3/5/7）
+# --mid-sweeps: 主解析（厚いスイープ。all_analyze_mid 用）
 MID_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 6, 8, 10, 12)
 MID_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 12, 16, 20, 24, 32)
 MID_WINDOW_NS_ACCUM: Tuple[int, ...] = (3, 5)
-MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
-MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
+MID_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)
+MID_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)
 MID_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
-MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)  # th=2 なし、6/10/16 含む
-MID_PAIR_EACH_END = 20  # hully 既定と同水準（全ペアにはしない）
+MID_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 6, 8, 10, 12, 16)
+MID_PAIR_EACH_END = 20
 MID_FOURIER_BAND_RADIUS = 2
 MID_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
+
+# --mid-fast-sweeps: 日常用（デコード枚数≈1/4 相当に間引き。all_analyze_mid_fast 用）
+MID_FAST_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 8, 12)
+MID_FAST_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 16, 24, 32)
+MID_FAST_WINDOW_NS_ACCUM: Tuple[int, ...] = (5,)
+MID_FAST_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
+MID_FAST_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
+MID_FAST_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 8, 12)
+MID_FAST_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 8, 12)
+MID_FAST_PAIR_EACH_END = 10
+MID_FAST_FOURIER_BAND_RADIUS = 2
+MID_FAST_PHASE_STEPS: Tuple[int, ...] = (8,)
 
 
 @dataclass(frozen=True)
@@ -139,16 +155,18 @@ class Top3Candidate:
 
 
 def resolve_sweep_profile(ns: argparse.Namespace) -> str:
-    """hard > mid > normal。両方指定時は hard 優先。"""
+    """hard > mid > mid_fast > normal。複数指定時は上位を優先。"""
     if bool(getattr(ns, "hard_sweeps", False)):
         return "hard"
     if bool(getattr(ns, "mid_sweeps", False)):
         return "mid"
+    if bool(getattr(ns, "mid_fast_sweeps", False)):
+        return "mid_fast"
     return "normal"
 
 
 def resolve_pass_list(ns: argparse.Namespace) -> Tuple[Tuple[str, str, str, str], ...]:
-    if resolve_sweep_profile(ns) in ("hard", "mid"):
+    if resolve_sweep_profile(ns) in ("hard", "mid", "mid_fast"):
         return ALL_PASSES + HARD_NUM_PASSES
     return ALL_PASSES
 
@@ -157,7 +175,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "R8 hully: sync -> 60 conditions -> d(t) once -> passes in-process "
-            "(6, or 10 with --hard-sweeps / --mid-sweeps)"
+            "(6, or 10 with --hard-sweeps / --mid-sweeps / --mid-fast-sweeps)"
         )
     )
     p.add_argument("--video", type=str, required=True)
@@ -221,8 +239,16 @@ def parse_args() -> argparse.Namespace:
         "--mid-sweeps",
         action="store_true",
         help=(
-            "hard 後継の主スイープ: pair±20・密 th・lockin phase 4/8/16・"
-            "*_num・hard 周波数候補（stat は薄め。all_analyze_mid 用）"
+            "主解析の厚い mid スイープ: pair±20・密 th・lockin phase 4/8/16・"
+            "*_num・hard 周波数候補（all_analyze_mid 用）"
+        ),
+    )
+    p.add_argument(
+        "--mid-fast-sweeps",
+        action="store_true",
+        help=(
+            "日常用の軽い mid スイープ: pair±10・間引き th・lockin phase=8・"
+            "*_num・hard 周波数候補（all_analyze_mid_fast 用）"
         ),
     )
     p.add_argument(
@@ -230,6 +256,16 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="fourier(帯付きFFT) の target 前後ビン数（既定: 1）",
+    )
+    p.add_argument(
+        "--decode-pool",
+        type=str,
+        choices=["thread", "process"],
+        default="thread",
+        help=(
+            "配列デコードの並列方式（既定: thread。"
+            "thread=pickle/spawn なし、process=旧 ProcessPool）"
+        ),
     )
     p.add_argument("--quiet", action="store_true")
     return p.parse_args()
@@ -291,6 +327,8 @@ def build_sweeps(
             default_ns = HARD_WINDOW_NS_ACCUM
         elif profile == "mid":
             default_ns = MID_WINDOW_NS_ACCUM
+        elif profile == "mid_fast":
+            default_ns = MID_FAST_WINDOW_NS_ACCUM
         else:
             default_ns = WINDOW_NS_ACCUM
         window_ns = parse_int_list(ns.window_ns, default_ns)
@@ -301,6 +339,8 @@ def build_sweeps(
                 default_th = HARD_DIFF_THRESHOLDS_ACCUM
             elif profile == "mid":
                 default_th = MID_DIFF_THRESHOLDS_ACCUM
+            elif profile == "mid_fast":
+                default_th = MID_FAST_DIFF_THRESHOLDS_ACCUM
             else:
                 default_th = DIFF_THRESHOLDS_ACCUM
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -326,6 +366,13 @@ def build_sweeps(
                 else MID_DIFF_THRESHOLDS_STAT_STD
             )
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
+        elif profile == "mid_fast":
+            default_th = (
+                MID_FAST_DIFF_THRESHOLDS_STAT_VAR
+                if stat_kind == "var"
+                else MID_FAST_DIFF_THRESHOLDS_STAT_STD
+            )
+            thresholds = parse_int_list(ns.diff_thresholds, default_th)
         else:
             default_th = DIFF_THRESHOLDS_STAT_VAR if stat_kind == "var" else DIFF_THRESHOLDS_STAT_STD
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -342,6 +389,8 @@ def build_sweeps(
                     default_th = HARD_DIFF_THRESHOLDS_LOCKIN
                 elif profile == "mid":
                     default_th = MID_DIFF_THRESHOLDS_LOCKIN
+                elif profile == "mid_fast":
+                    default_th = MID_FAST_DIFF_THRESHOLDS_LOCKIN
                 else:
                     default_th = DIFF_THRESHOLDS_FOURIER
             else:
@@ -349,6 +398,8 @@ def build_sweeps(
                     default_th = HARD_DIFF_THRESHOLDS_FREQ
                 elif profile == "mid":
                     default_th = MID_DIFF_THRESHOLDS_FREQ
+                elif profile == "mid_fast":
+                    default_th = MID_FAST_DIFF_THRESHOLDS_FREQ
                 else:
                     default_th = DIFF_THRESHOLDS_FOURIER
             thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -359,7 +410,7 @@ def build_sweeps(
         elif meta is not None:
             resolver = (
                 resolve_target_freqs_hard
-                if profile in ("hard", "mid")
+                if profile in ("hard", "mid", "mid_fast")
                 else resolve_target_freqs
             )
             target_freqs = tuple(resolver(meta.rate_hz, fps))
@@ -372,6 +423,8 @@ def build_sweeps(
                 phase_list: Tuple[Optional[int], ...] = HARD_PHASE_STEPS
             elif profile == "mid":
                 phase_list = MID_PHASE_STEPS
+            elif profile == "mid_fast":
+                phase_list = MID_FAST_PHASE_STEPS
             else:
                 phase_list = (8,)
             sweeps = [
@@ -391,6 +444,8 @@ def build_sweeps(
             default_th = HARD_DIFF_THRESHOLDS_PAIR
         elif profile == "mid":
             default_th = MID_DIFF_THRESHOLDS_PAIR
+        elif profile == "mid_fast":
+            default_th = MID_FAST_DIFF_THRESHOLDS_PAIR
         else:
             default_th = DIFF_THRESHOLDS_PAIR
         thresholds = parse_int_list(ns.diff_thresholds, default_th)
@@ -408,6 +463,8 @@ def resolve_pair_each_end(ns: argparse.Namespace) -> int:
             return HARD_PAIR_EACH_END
         if profile == "mid":
             return MID_PAIR_EACH_END
+        if profile == "mid_fast":
+            return MID_FAST_PAIR_EACH_END
     return max(0, int(ns.pair_each_end))
 
 
@@ -418,6 +475,8 @@ def resolve_fourier_band_radius(ns: argparse.Namespace) -> int:
             return HARD_FOURIER_BAND_RADIUS
         if profile == "mid":
             return MID_FOURIER_BAND_RADIUS
+        if profile == "mid_fast":
+            return MID_FAST_FOURIER_BAND_RADIUS
     return max(0, int(ns.fourier_band_radius))
 
 
@@ -471,25 +530,46 @@ def relative_diff_path(folder_name: str, spec: MapSpec) -> str:
     return f"{folder_name}/{spec.diff_subdir}/{spec.pair_name}_{SCALE_TAG}.png"
 
 
+def resolve_decode_pool_workers(workers: int, n_tasks: Optional[int] = None) -> int:
+    cpu_count = os.cpu_count() or 1
+    capped = min(max(1, int(workers)), cpu_count)
+    if n_tasks is None:
+        return capped
+    return min(capped, max(1, int(n_tasks)))
+
+
+def make_decode_executor(pool_kind: str, workers: int) -> Executor:
+    pool_workers = resolve_decode_pool_workers(workers)
+    if pool_kind == "process":
+        return ProcessPoolExecutor(max_workers=pool_workers)
+    return ThreadPoolExecutor(max_workers=pool_workers)
+
+
 def run_decode_batch(
     tasks: List[Dict[str, object]],
     workers: int,
+    *,
+    executor: Optional[Executor] = None,
+    pool_kind: str = "thread",
 ) -> List[Dict[str, object]]:
     if not tasks:
         return []
-    cpu_count = os.cpu_count() or 1
-    pool_workers = min(max(1, workers), cpu_count, len(tasks))
-    rows: List[Dict[str, object]] = []
-    if pool_workers <= 1:
-        for task in tasks:
-            rows.append(process_array_task(task))
-        return rows
+    pool_workers = resolve_decode_pool_workers(workers, len(tasks))
+    if pool_workers <= 1 and executor is None:
+        return [process_array_task(task) for task in tasks]
 
-    with ProcessPoolExecutor(max_workers=pool_workers) as executor:
-        futures = [executor.submit(process_array_task, task) for task in tasks]
-        for future in as_completed(futures):
-            rows.append(future.result())
-    return rows
+    owns_executor = executor is None
+    active = executor
+    if active is None:
+        kind = pool_kind if pool_kind in ("thread", "process") else "thread"
+        active = make_decode_executor(kind, pool_workers)
+    assert active is not None
+    try:
+        futures = [active.submit(process_array_task, task) for task in tasks]
+        return [future.result() for future in as_completed(futures)]
+    finally:
+        if owns_executor:
+            active.shutdown(wait=True)
 
 
 def decode_row_from_result(result: Dict[str, object]) -> Dict[str, object]:
@@ -726,7 +806,7 @@ def main() -> None:
     pair_each_end = resolve_pair_each_end(ns)
     fourier_band_radius = resolve_fourier_band_radius(ns)
     profile = resolve_sweep_profile(ns)
-    if profile in ("hard", "mid"):
+    if profile in ("hard", "mid", "mid_fast"):
         log_info(
             f"[INFO] {profile}-sweeps on: pair_each_end={pair_each_end} "
             f"fourier_band_radius={fourier_band_radius} "
@@ -771,449 +851,462 @@ def main() -> None:
     reused_conditions = 0
     extracted_conditions = 0
 
-    for i, cond in enumerate(conditions):
-        block_start = sync_frame + int(round(cond_starts_sec[i] * fps))
-        start = block_start + use_start
-        end = block_start + use_end
-        folder_name = condition_folder_name(cond)
-        cond_dir = out_root / folder_name
-        ensure_dir(cond_dir)
+    decode_pool = str(ns.decode_pool)
+    decode_workers = resolve_decode_pool_workers(int(ns.workers))
+    log_info(f"[INFO] decode-pool={decode_pool} workers={decode_workers}")
+    decode_executor = make_decode_executor(decode_pool, decode_workers)
+    try:
+        for i, cond in enumerate(conditions):
+            block_start = sync_frame + int(round(cond_starts_sec[i] * fps))
+            start = block_start + use_start
+            end = block_start + use_end
+            folder_name = condition_folder_name(cond)
+            cond_dir = out_root / folder_name
+            ensure_dir(cond_dir)
 
-        if ns.reuse_frames and has_reusable_analysis_frames(cond_dir, ANALYSIS_FRAME_COUNT):
-            analyzed = count_consecutive_analysis_frames(cond_dir)
-            extract_sec = 0.0
-            reused_conditions += 1
-            log_info(f"[INFO] ({i+1}/{len(conditions)}) reuse {folder_name}: frames={analyzed}")
-        else:
-            analyzed = save_block_frames(video_path, start, end, cond_dir, analysis_frames=ANALYSIS_FRAME_COUNT)
-            extract_sec = (analyzed / fps) if fps > 0 else 0.0
-            extracted_conditions += 1
-            log_info(f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: frames={analyzed}")
-
-        rgb_list = load_rgb_frames(cond_dir, analyzed)
-        d_stack = build_pair_diff_stack(rgb_list)
-
-        if int(ns.keep_frames) <= 0:
-            removed = delete_frame_pngs(cond_dir)
-            log_info(f"[INFO] ({i+1}/{len(conditions)}) deleted {removed} frame PNGs (keep-frames=0)")
-
-        top3_pool: List[Top3Candidate] = []
-        all_specs_for_save: List[MapSpec] = []
-
-        for pass_label, diff_mode, stat_kind, repr_mode in passes:
-            state = pass_state[pass_label]
-            sweeps: List[SweepKey] = state["sweeps"]
-            folder_decode_rows: List[Dict[str, str]] = []
-            sweep_candidates: List[
-                Tuple[
-                    Optional[int],
-                    Optional[float],
-                    int,
-                    Dict[str, str],
-                    List[Dict[str, str]],
-                    float,
-                    bool,
-                    int,
-                    int,
-                    SweepKey,
-                    int,
-                    str,
-                    str,
-                    str,
-                ]
-            ] = []
-            target_freqs: Tuple[float, ...] = state["target_freqs"]
-            freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
-            common_meta = format_common_meta(video_path.name, meta, fps)
-            repr_mode = str(state.get("repr_mode") or "binary")
-
-            pass_tasks: List[Dict[str, object]] = []
-            task_specs: Dict[str, MapSpec] = {}
-            task_sweeps: Dict[str, SweepKey] = {}
-
-            for sweep in sweeps:
-                specs = generate_maps_for_sweep(
-                    d_stack,
-                    sweep,
-                    fps,
-                    pair_each_end if diff_mode == "pair" else 0,
-                    fourier_band_radius=fourier_band_radius,
-                )
-                if ns.save_diff_maps == "all":
-                    all_specs_for_save.extend(specs)
-
-                for spec_idx, spec in enumerate(specs):
-                    task_key = (
-                        f"{pass_label}:{sweep.diff_mode}:{sweep.stat_kind}:"
-                        f"{sweep.window_n}:{sweep.fft_target_hz}:{sweep.diff_threshold}:"
-                        f"{sweep.phase_steps}:{sweep.repr_mode}:{spec_idx}"
-                    )
-                    pass_tasks.append(
-                        {
-                            "rgb": spec.rgb,
-                            "folder": folder_name,
-                            "frame_1": spec.frame_1,
-                            "frame_2": spec.frame_2,
-                            "diff_image": "",
-                            "kernel_candidates": kernel_candidates,
-                            "median_iterations": DEFAULT_MEDIAN_ITERATIONS,
-                            "search_mode": search_mode,
-                            "gt_path": gt_path_str,
-                            "task_key": task_key,
-                            "diff_stem": spec.pair_name,
-                        }
-                    )
-                    task_specs[task_key] = spec
-                    task_sweeps[task_key] = sweep
-
-            decode_results = run_decode_batch(pass_tasks, int(ns.workers))
-            decode_results = [decode_row_from_result(r) for r in decode_results]
-
-            results_by_sweep: Dict[Tuple[Any, ...], List[Dict[str, object]]] = {}
-            for result in decode_results:
-                task_key = str(result.get("task_key") or "")
-                sweep = task_sweeps.get(task_key)
-                if sweep is None:
-                    continue
-                key = (
-                    sweep.window_n,
-                    sweep.fft_target_hz,
-                    sweep.diff_threshold,
-                    sweep.phase_steps,
-                )
-                results_by_sweep.setdefault(key, []).append(result)
-
-                acc = _parse_acc(result.get("accuracy"))
-                success = bool(result.get("success"))
-                spec = task_specs[task_key]
-                top3_pool.append(
-                    Top3Candidate(
-                        sweep=sweep,
-                        spec=spec,
-                        pass_label=pass_label,
-                        success=success,
-                        accuracy=acc,
-                        frame_1=str(result.get("frame_1") or spec.frame_1),
-                        frame_2=str(result.get("frame_2") or spec.frame_2),
-                    )
-                )
-
-            saved_paths: Dict[str, str] = {}
-            for sweep in sweeps:
-                key = (
-                    sweep.window_n,
-                    sweep.fft_target_hz,
-                    sweep.diff_threshold,
-                    sweep.phase_steps,
-                )
-                rows = results_by_sweep.get(key, [])
-                specs_by_key = {
-                    tk: spec for tk, spec in task_specs.items() if task_sweeps.get(tk) == sweep
-                }
-                tagged = tag_decode_rows(rows, sweep, saved_paths, folder_name, specs_by_key)
-                folder_decode_rows.extend(tagged)
-
-                th_rows = tagged
-                dec_th = pick_decode_row_for_folder(th_rows, folder_name)
-                ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
-                acc_all_str, _ = pixel_accuracy_for_folder(th_rows, folder_name)
-                acc_all_val = float(acc_all_str) if acc_all_str else float("-inf")
-                pixel_acc_all_s, pixel_acc_ok_s = pixel_accuracy_for_folder(th_rows, folder_name)
-                pixel_acc_best_s, best_f1_s, best_f2_s = best_accuracy_for_folder(
-                    th_rows, folder_name
-                )
-                freq_rank = (
-                    freq_rank_map.get(sweep.fft_target_hz, 0)
-                    if sweep.fft_target_hz is not None
-                    else 0
-                )
-                phase_rank = (
-                    {4: 0, 8: 1, 16: 2}.get(int(sweep.phase_steps), 9)
-                    if sweep.phase_steps is not None
-                    else 0
-                )
-                method_s = str(dec_th.get("method", "") or "")
-                variant_s = parse_decode_variant(method_s) if method_s else ""
-                if ok:
-                    note_s = ""
-                else:
-                    note_s = str(dec_th.get("note") or "QR未検出") if dec_th else "デコード結果なし"
-                    variant_s = ""
-                sweep_candidates.append(
-                    (
-                        sweep.window_n,
-                        sweep.fft_target_hz,
-                        sweep.diff_threshold,
-                        dec_th,
-                        th_rows,
-                        acc_all_val,
-                        ok,
-                        freq_rank,
-                        phase_rank,
-                        sweep,
-                        len(th_rows),
-                        pixel_acc_all_s,
-                        pixel_acc_ok_s,
-                        pixel_acc_best_s,
-                        best_f1_s,
-                        best_f2_s,
-                        method_s if ok else "",
-                        variant_s,
-                        note_s,
-                        str(dec_th.get("decoded_text", "") or "") if ok else "",
-                        str(dec_th.get("frame_1", "") or ""),
-                        str(dec_th.get("frame_2", "") or ""),
-                    )
-                )
-
-            if sweep_candidates:
-                def _sort_key(item: Tuple[Any, ...]) -> Tuple[int, float, int, int, int, int, int]:
-                    win_n, _fft, th, _dec, _rows, acc, ok, freq_rank, phase_rank = item[:9]
-                    has_acc = acc != float("-inf")
-                    return (
-                        0 if has_acc else 1,
-                        -acc if has_acc else 0.0,
-                        0 if ok else 1,
-                        th,
-                        win_n if win_n is not None else 0,
-                        freq_rank,
-                        phase_rank,
-                    )
-
-                sweep_candidates.sort(key=_sort_key)
-                best_item = sweep_candidates[0]
-                best_window_n = best_item[0]
-                best_fft_freq = best_item[1]
-                best_th = best_item[2]
-                best_dec = best_item[3]
-                best_rows = best_item[4]
-                best_ok = best_item[6]
-                best_sweep_key = (
-                    best_item[9].window_n,
-                    best_item[9].fft_target_hz,
-                    best_item[9].diff_threshold,
-                    best_item[9].phase_steps,
-                )
+            if ns.reuse_frames and has_reusable_analysis_frames(cond_dir, ANALYSIS_FRAME_COUNT):
+                analyzed = count_consecutive_analysis_frames(cond_dir)
+                extract_sec = 0.0
+                reused_conditions += 1
+                log_info(f"[INFO] ({i+1}/{len(conditions)}) reuse {folder_name}: frames={analyzed}")
             else:
-                best_window_n = best_fft_freq = best_th = None
-                best_dec = {}
-                best_rows = []
-                best_ok = False
-                best_sweep_key = None
+                analyzed = save_block_frames(video_path, start, end, cond_dir, analysis_frames=ANALYSIS_FRAME_COUNT)
+                extract_sec = (analyzed / fps) if fps > 0 else 0.0
+                extracted_conditions += 1
+                log_info(f"[INFO] ({i+1}/{len(conditions)}) extract {folder_name}: frames={analyzed}")
 
-            decode_note = ""
-            if analyzed <= 0:
-                decode_note = "extract失敗: 0 frames"
+            rgb_list = load_rgb_frames(cond_dir, analyzed)
+            d_stack = build_pair_diff_stack(rgb_list)
 
-            state["all_decode_rows"] = [
-                r for r in state["all_decode_rows"] if r.get("folder") != folder_name
-            ]
-            state["all_decode_rows"].extend(folder_decode_rows)
-            write_csv(state["decode_csv"], state["all_decode_rows"])
+            if int(ns.keep_frames) <= 0:
+                removed = delete_frame_pngs(cond_dir)
+                log_info(f"[INFO] ({i+1}/{len(conditions)}) deleted {removed} frame PNGs (keep-frames=0)")
 
-            # 条件×スイープ詳細（全スイープ）
-            state["sweep_results"] = [
-                r for r in state["sweep_results"] if r.get("folder") != folder_name
-            ]
-            for item in sweep_candidates:
-                (
-                    win_n,
-                    fft_freq,
-                    th,
-                    _dec,
-                    _rows,
-                    _acc,
-                    ok,
-                    _fr,
-                    _pr,
-                    sweep,
-                    n_maps,
-                    pac_all,
-                    pac_ok,
-                    pac_best,
-                    bf1,
-                    bf2,
-                    method_s,
-                    variant_s,
-                    note_s,
-                    decoded_text,
-                    df1,
-                    df2,
-                ) = item
-                adopted = (
-                    best_sweep_key is not None
-                    and (
+            top3_pool: List[Top3Candidate] = []
+            all_specs_for_save: List[MapSpec] = []
+
+            for pass_label, diff_mode, stat_kind, repr_mode in passes:
+                state = pass_state[pass_label]
+                sweeps: List[SweepKey] = state["sweeps"]
+                folder_decode_rows: List[Dict[str, str]] = []
+                sweep_candidates: List[
+                    Tuple[
+                        Optional[int],
+                        Optional[float],
+                        int,
+                        Dict[str, str],
+                        List[Dict[str, str]],
+                        float,
+                        bool,
+                        int,
+                        int,
+                        SweepKey,
+                        int,
+                        str,
+                        str,
+                        str,
+                    ]
+                ] = []
+                target_freqs: Tuple[float, ...] = state["target_freqs"]
+                freq_rank_map = {freq: idx for idx, freq in enumerate(target_freqs)}
+                common_meta = format_common_meta(video_path.name, meta, fps)
+                repr_mode = str(state.get("repr_mode") or "binary")
+
+                pass_tasks: List[Dict[str, object]] = []
+                task_specs: Dict[str, MapSpec] = {}
+                task_sweeps: Dict[str, SweepKey] = {}
+
+                for sweep in sweeps:
+                    specs = generate_maps_for_sweep(
+                        d_stack,
+                        sweep,
+                        fps,
+                        pair_each_end if diff_mode == "pair" else 0,
+                        fourier_band_radius=fourier_band_radius,
+                    )
+                    if ns.save_diff_maps == "all":
+                        all_specs_for_save.extend(specs)
+
+                    for spec_idx, spec in enumerate(specs):
+                        task_key = (
+                            f"{pass_label}:{sweep.diff_mode}:{sweep.stat_kind}:"
+                            f"{sweep.window_n}:{sweep.fft_target_hz}:{sweep.diff_threshold}:"
+                            f"{sweep.phase_steps}:{sweep.repr_mode}:{spec_idx}"
+                        )
+                        pass_tasks.append(
+                            {
+                                "rgb": spec.rgb,
+                                "folder": folder_name,
+                                "frame_1": spec.frame_1,
+                                "frame_2": spec.frame_2,
+                                "diff_image": "",
+                                "kernel_candidates": kernel_candidates,
+                                "median_iterations": DEFAULT_MEDIAN_ITERATIONS,
+                                "search_mode": search_mode,
+                                "gt_path": gt_path_str,
+                                "task_key": task_key,
+                                "diff_stem": spec.pair_name,
+                            }
+                        )
+                        task_specs[task_key] = spec
+                        task_sweeps[task_key] = sweep
+
+                decode_results = run_decode_batch(
+                    pass_tasks,
+                    int(ns.workers),
+                    executor=decode_executor,
+                    pool_kind=decode_pool,
+                )
+                decode_results = [decode_row_from_result(r) for r in decode_results]
+
+                results_by_sweep: Dict[Tuple[Any, ...], List[Dict[str, object]]] = {}
+                for result in decode_results:
+                    task_key = str(result.get("task_key") or "")
+                    sweep = task_sweeps.get(task_key)
+                    if sweep is None:
+                        continue
+                    key = (
                         sweep.window_n,
                         sweep.fft_target_hz,
                         sweep.diff_threshold,
                         sweep.phase_steps,
                     )
-                    == best_sweep_key
-                )
-                sweep_row: Dict[str, Any] = {
+                    results_by_sweep.setdefault(key, []).append(result)
+
+                    acc = _parse_acc(result.get("accuracy"))
+                    success = bool(result.get("success"))
+                    spec = task_specs[task_key]
+                    top3_pool.append(
+                        Top3Candidate(
+                            sweep=sweep,
+                            spec=spec,
+                            pass_label=pass_label,
+                            success=success,
+                            accuracy=acc,
+                            frame_1=str(result.get("frame_1") or spec.frame_1),
+                            frame_2=str(result.get("frame_2") or spec.frame_2),
+                        )
+                    )
+
+                saved_paths: Dict[str, str] = {}
+                for sweep in sweeps:
+                    key = (
+                        sweep.window_n,
+                        sweep.fft_target_hz,
+                        sweep.diff_threshold,
+                        sweep.phase_steps,
+                    )
+                    rows = results_by_sweep.get(key, [])
+                    specs_by_key = {
+                        tk: spec for tk, spec in task_specs.items() if task_sweeps.get(tk) == sweep
+                    }
+                    tagged = tag_decode_rows(rows, sweep, saved_paths, folder_name, specs_by_key)
+                    folder_decode_rows.extend(tagged)
+
+                    th_rows = tagged
+                    dec_th = pick_decode_row_for_folder(th_rows, folder_name)
+                    ok = str(dec_th.get("success", "")).strip() in ("1", "True", "true")
+                    acc_all_str, _ = pixel_accuracy_for_folder(th_rows, folder_name)
+                    acc_all_val = float(acc_all_str) if acc_all_str else float("-inf")
+                    pixel_acc_all_s, pixel_acc_ok_s = pixel_accuracy_for_folder(th_rows, folder_name)
+                    pixel_acc_best_s, best_f1_s, best_f2_s = best_accuracy_for_folder(
+                        th_rows, folder_name
+                    )
+                    freq_rank = (
+                        freq_rank_map.get(sweep.fft_target_hz, 0)
+                        if sweep.fft_target_hz is not None
+                        else 0
+                    )
+                    phase_rank = (
+                        {4: 0, 8: 1, 16: 2}.get(int(sweep.phase_steps), 9)
+                        if sweep.phase_steps is not None
+                        else 0
+                    )
+                    method_s = str(dec_th.get("method", "") or "")
+                    variant_s = parse_decode_variant(method_s) if method_s else ""
+                    if ok:
+                        note_s = ""
+                    else:
+                        note_s = str(dec_th.get("note") or "QR未検出") if dec_th else "デコード結果なし"
+                        variant_s = ""
+                    sweep_candidates.append(
+                        (
+                            sweep.window_n,
+                            sweep.fft_target_hz,
+                            sweep.diff_threshold,
+                            dec_th,
+                            th_rows,
+                            acc_all_val,
+                            ok,
+                            freq_rank,
+                            phase_rank,
+                            sweep,
+                            len(th_rows),
+                            pixel_acc_all_s,
+                            pixel_acc_ok_s,
+                            pixel_acc_best_s,
+                            best_f1_s,
+                            best_f2_s,
+                            method_s if ok else "",
+                            variant_s,
+                            note_s,
+                            str(dec_th.get("decoded_text", "") or "") if ok else "",
+                            str(dec_th.get("frame_1", "") or ""),
+                            str(dec_th.get("frame_2", "") or ""),
+                        )
+                    )
+
+                if sweep_candidates:
+                    def _sort_key(item: Tuple[Any, ...]) -> Tuple[int, float, int, int, int, int, int]:
+                        win_n, _fft, th, _dec, _rows, acc, ok, freq_rank, phase_rank = item[:9]
+                        has_acc = acc != float("-inf")
+                        return (
+                            0 if has_acc else 1,
+                            -acc if has_acc else 0.0,
+                            0 if ok else 1,
+                            th,
+                            win_n if win_n is not None else 0,
+                            freq_rank,
+                            phase_rank,
+                        )
+
+                    sweep_candidates.sort(key=_sort_key)
+                    best_item = sweep_candidates[0]
+                    best_window_n = best_item[0]
+                    best_fft_freq = best_item[1]
+                    best_th = best_item[2]
+                    best_dec = best_item[3]
+                    best_rows = best_item[4]
+                    best_ok = best_item[6]
+                    best_sweep_key = (
+                        best_item[9].window_n,
+                        best_item[9].fft_target_hz,
+                        best_item[9].diff_threshold,
+                        best_item[9].phase_steps,
+                    )
+                else:
+                    best_window_n = best_fft_freq = best_th = None
+                    best_dec = {}
+                    best_rows = []
+                    best_ok = False
+                    best_sweep_key = None
+
+                decode_note = ""
+                if analyzed <= 0:
+                    decode_note = "extract失敗: 0 frames"
+
+                state["all_decode_rows"] = [
+                    r for r in state["all_decode_rows"] if r.get("folder") != folder_name
+                ]
+                state["all_decode_rows"].extend(folder_decode_rows)
+                write_csv(state["decode_csv"], state["all_decode_rows"])
+
+                # 条件×スイープ詳細（全スイープ）
+                state["sweep_results"] = [
+                    r for r in state["sweep_results"] if r.get("folder") != folder_name
+                ]
+                for item in sweep_candidates:
+                    (
+                        win_n,
+                        fft_freq,
+                        th,
+                        _dec,
+                        _rows,
+                        _acc,
+                        ok,
+                        _fr,
+                        _pr,
+                        sweep,
+                        n_maps,
+                        pac_all,
+                        pac_ok,
+                        pac_best,
+                        bf1,
+                        bf2,
+                        method_s,
+                        variant_s,
+                        note_s,
+                        decoded_text,
+                        df1,
+                        df2,
+                    ) = item
+                    adopted = (
+                        best_sweep_key is not None
+                        and (
+                            sweep.window_n,
+                            sweep.fft_target_hz,
+                            sweep.diff_threshold,
+                            sweep.phase_steps,
+                        )
+                        == best_sweep_key
+                    )
+                    sweep_row: Dict[str, Any] = {
+                        "folder": folder_name,
+                        "pass": pass_label,
+                        "adopted": "1" if adopted else "0",
+                        "decode_success": "1" if ok else "0",
+                        "decode_note": note_s if not decode_note else decode_note,
+                        "decode_variant": variant_s if ok and not decode_note else "",
+                        "diff_mode": diff_mode,
+                        "repr_mode": repr_mode,
+                        "window_n": "" if win_n is None else str(win_n),
+                        "stat_kind": stat_kind if diff_mode == "stat" else "",
+                        "fft_target_hz": "" if fft_freq is None else f"{fft_freq:.6f}",
+                        "diff_threshold": str(th),
+                        "phase_steps": (
+                            "" if sweep.phase_steps is None else str(sweep.phase_steps)
+                        ),
+                        "n_maps": str(n_maps),
+                        "pixel_acc_all": pac_all,
+                        "pixel_acc_ok": pac_ok,
+                        "pixel_acc_best": pac_best,
+                        "best_pair_frame_1": bf1,
+                        "best_pair_frame_2": bf2,
+                        "cond": i,
+                        "image": cond.get("image", ""),
+                        "channel": cond.get("channel", ""),
+                        "token": cond.get("token", ""),
+                        "intensity": cond.get("intensity", ""),
+                        "decode_decoded_text": decoded_text if ok and not decode_note else "",
+                        "decode_method": method_s if ok and not decode_note else "",
+                        "decode_frame_1": df1,
+                        "decode_frame_2": df2,
+                        "note": decode_note,
+                        "analysis_frames": analyzed,
+                        "extract_sec": f"{extract_sec:.6f}",
+                    }
+                    sweep_row.update(common_meta)
+                    state["sweep_results"].append(sweep_row)
+                write_results_sweep_csv(state["results_sweep_csv"], state["sweep_results"])
+
+                dec = best_dec
+                pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(best_rows, folder_name)
+                pixel_acc_best, best_pair_f1, best_pair_f2 = best_accuracy_for_folder(best_rows, folder_name)
+                method = dec.get("method", "") if dec else ""
+                decode_variant = parse_decode_variant(method) if method else ""
+
+                if decode_note:
+                    decode_note_out = decode_note
+                elif not dec:
+                    decode_note_out = "デコード結果なし"
+                elif str(dec.get("success", "")).strip() in ("1", "True", "true"):
+                    decode_note_out = ""
+                else:
+                    decode_note_out = str(dec.get("note") or "QR未検出")
+                    decode_variant = ""
+
+                row: Dict[str, Any] = {
                     "folder": folder_name,
-                    "pass": pass_label,
-                    "adopted": "1" if adopted else "0",
-                    "decode_success": "1" if ok else "0",
-                    "decode_note": note_s if not decode_note else decode_note,
-                    "decode_variant": variant_s if ok and not decode_note else "",
+                    "decode_note": decode_note_out,
+                    "decode_variant": decode_variant if not decode_note_out else "",
                     "diff_mode": diff_mode,
-                    "repr_mode": repr_mode,
-                    "window_n": "" if win_n is None else str(win_n),
+                    "window_n": "" if best_window_n is None else str(best_window_n),
                     "stat_kind": stat_kind if diff_mode == "stat" else "",
-                    "fft_target_hz": "" if fft_freq is None else f"{fft_freq:.6f}",
-                    "diff_threshold": str(th),
-                    "phase_steps": (
-                        "" if sweep.phase_steps is None else str(sweep.phase_steps)
-                    ),
-                    "n_maps": str(n_maps),
-                    "pixel_acc_all": pac_all,
-                    "pixel_acc_ok": pac_ok,
-                    "pixel_acc_best": pac_best,
-                    "best_pair_frame_1": bf1,
-                    "best_pair_frame_2": bf2,
+                    "fft_target_hz": "" if best_fft_freq is None else f"{best_fft_freq:.6f}",
+                    "diff_threshold": "" if best_th is None else str(best_th),
+                    "pixel_acc_all": pixel_acc_all,
+                    "pixel_acc_ok": pixel_acc_ok,
+                    "pixel_acc_best": pixel_acc_best,
+                    "best_pair_frame_1": best_pair_f1,
+                    "best_pair_frame_2": best_pair_f2,
                     "cond": i,
                     "image": cond.get("image", ""),
                     "channel": cond.get("channel", ""),
                     "token": cond.get("token", ""),
                     "intensity": cond.get("intensity", ""),
-                    "decode_decoded_text": decoded_text if ok and not decode_note else "",
-                    "decode_method": method_s if ok and not decode_note else "",
-                    "decode_frame_1": df1,
-                    "decode_frame_2": df2,
+                    "decode_decoded_text": dec.get("decoded_text", "") if dec else "",
+                    "decode_method": method if not decode_note_out else "",
+                    "decode_frame_1": dec.get("frame_1", "") if dec else "",
+                    "decode_frame_2": dec.get("frame_2", "") if dec else "",
                     "note": decode_note,
                     "analysis_frames": analyzed,
                     "extract_sec": f"{extract_sec:.6f}",
                 }
-                sweep_row.update(common_meta)
-                state["sweep_results"].append(sweep_row)
-            write_results_sweep_csv(state["results_sweep_csv"], state["sweep_results"])
+                row.update(common_meta)
+                state["results"].append(row)
+                write_results_csv(state["results_csv"], state["results"])
 
-            dec = best_dec
-            pixel_acc_all, pixel_acc_ok = pixel_accuracy_for_folder(best_rows, folder_name)
-            pixel_acc_best, best_pair_f1, best_pair_f2 = best_accuracy_for_folder(best_rows, folder_name)
-            method = dec.get("method", "") if dec else ""
-            decode_variant = parse_decode_variant(method) if method else ""
+                if diff_mode == "pair" and best_rows:
+                    state["all_pair_accuracy_rows"] = [
+                        r for r in state["all_pair_accuracy_rows"] if r.get("folder") != folder_name
+                    ]
+                    for pr in select_first_last_pair_rows(best_rows):
+                        state["all_pair_accuracy_rows"].append(
+                            {
+                                "folder": folder_name,
+                                "cond": i,
+                                "frame_1": pr.get("frame_1", ""),
+                                "frame_2": pr.get("frame_2", ""),
+                                "success": pr.get("success", ""),
+                                "accuracy": pr.get("accuracy", ""),
+                                "recall": pr.get("recall", ""),
+                                "precision": pr.get("precision", ""),
+                                "diff_threshold": pr.get("diff_threshold", ""),
+                            }
+                        )
+                    write_pair_accuracy_csv(state["pair_accuracy_csv"], state["all_pair_accuracy_rows"])
 
-            if decode_note:
-                decode_note_out = decode_note
-            elif not dec:
-                decode_note_out = "デコード結果なし"
-            elif str(dec.get("success", "")).strip() in ("1", "True", "true"):
-                decode_note_out = ""
-            else:
-                decode_note_out = str(dec.get("note") or "QR未検出")
-                decode_variant = ""
+            saved_paths_final: Dict[str, str] = {}
+            picks: List[Top3Candidate] = []
+            save_mode = str(ns.save_diff_maps)
+            top_n = {"top3": 3, "top5": 5}.get(save_mode, 0)
+            if save_mode == "per_pass":
+                picks = pick_per_pass_candidates(top3_pool)
+                save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
+                log_info(
+                    f"[INFO] ({i+1}/{len(conditions)}) saved per_pass={len(picks)} diff PNGs"
+                )
+            elif top_n > 0:
+                picks = pick_top_n_candidates(top3_pool, n=top_n)
+                save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
+                log_info(
+                    f"[INFO] ({i+1}/{len(conditions)}) saved top{top_n}={len(picks)} diff PNGs"
+                )
+            elif save_mode == "all":
+                save_all_maps(cond_dir, folder_name, all_specs_for_save, saved_paths_final)
+                log_info(
+                    f"[INFO] ({i+1}/{len(conditions)}) saved all diff PNGs={len(all_specs_for_save)}"
+                )
 
-            row: Dict[str, Any] = {
-                "folder": folder_name,
-                "decode_note": decode_note_out,
-                "decode_variant": decode_variant if not decode_note_out else "",
-                "diff_mode": diff_mode,
-                "window_n": "" if best_window_n is None else str(best_window_n),
-                "stat_kind": stat_kind if diff_mode == "stat" else "",
-                "fft_target_hz": "" if best_fft_freq is None else f"{best_fft_freq:.6f}",
-                "diff_threshold": "" if best_th is None else str(best_th),
-                "pixel_acc_all": pixel_acc_all,
-                "pixel_acc_ok": pixel_acc_ok,
-                "pixel_acc_best": pixel_acc_best,
-                "best_pair_frame_1": best_pair_f1,
-                "best_pair_frame_2": best_pair_f2,
-                "cond": i,
-                "image": cond.get("image", ""),
-                "channel": cond.get("channel", ""),
-                "token": cond.get("token", ""),
-                "intensity": cond.get("intensity", ""),
-                "decode_decoded_text": dec.get("decoded_text", "") if dec else "",
-                "decode_method": method if not decode_note_out else "",
-                "decode_frame_1": dec.get("frame_1", "") if dec else "",
-                "decode_frame_2": dec.get("frame_2", "") if dec else "",
-                "note": decode_note,
-                "analysis_frames": analyzed,
-                "extract_sec": f"{extract_sec:.6f}",
-            }
-            row.update(common_meta)
-            state["results"].append(row)
-            write_results_csv(state["results_csv"], state["results"])
-
-            if diff_mode == "pair" and best_rows:
-                state["all_pair_accuracy_rows"] = [
-                    r for r in state["all_pair_accuracy_rows"] if r.get("folder") != folder_name
-                ]
-                for pr in select_first_last_pair_rows(best_rows):
-                    state["all_pair_accuracy_rows"].append(
-                        {
-                            "folder": folder_name,
-                            "cond": i,
-                            "frame_1": pr.get("frame_1", ""),
-                            "frame_2": pr.get("frame_2", ""),
-                            "success": pr.get("success", ""),
-                            "accuracy": pr.get("accuracy", ""),
-                            "recall": pr.get("recall", ""),
-                            "precision": pr.get("precision", ""),
-                            "diff_threshold": pr.get("diff_threshold", ""),
-                        }
-                    )
-                write_pair_accuracy_csv(state["pair_accuracy_csv"], state["all_pair_accuracy_rows"])
-
-        saved_paths_final: Dict[str, str] = {}
-        picks: List[Top3Candidate] = []
-        save_mode = str(ns.save_diff_maps)
-        top_n = {"top3": 3, "top5": 5}.get(save_mode, 0)
-        if save_mode == "per_pass":
-            picks = pick_per_pass_candidates(top3_pool)
-            save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
-            log_info(
-                f"[INFO] ({i+1}/{len(conditions)}) saved per_pass={len(picks)} diff PNGs"
-            )
-        elif top_n > 0:
-            picks = pick_top_n_candidates(top3_pool, n=top_n)
-            save_top_maps(cond_dir, folder_name, picks, out_root, saved_paths_final)
-            log_info(
-                f"[INFO] ({i+1}/{len(conditions)}) saved top{top_n}={len(picks)} diff PNGs"
-            )
-        elif save_mode == "all":
-            save_all_maps(cond_dir, folder_name, all_specs_for_save, saved_paths_final)
-            log_info(
-                f"[INFO] ({i+1}/{len(conditions)}) saved all diff PNGs={len(all_specs_for_save)}"
-            )
-
-        if saved_paths_final:
-            saved_rels = set(saved_paths_final.keys())
-            for pass_label in pass_state:
-                state = pass_state[pass_label]
-                rows = state["all_decode_rows"]
-                for row in rows:
-                    if row.get("folder") != folder_name:
-                        continue
-                    rel_hint = str(row.get("diff_image") or "")
-                    if rel_hint and rel_hint not in saved_rels:
-                        row["diff_image"] = ""
-                for pick in picks if picks else []:
-                    if pick.pass_label != pass_label:
-                        continue
-                    rel = relative_diff_path(folder_name, pick.spec)
+            if saved_paths_final:
+                saved_rels = set(saved_paths_final.keys())
+                for pass_label in pass_state:
+                    state = pass_state[pass_label]
+                    rows = state["all_decode_rows"]
                     for row in rows:
                         if row.get("folder") != folder_name:
                             continue
-                        if (
-                            row.get("frame_1") == pick.frame_1
-                            and row.get("frame_2") == pick.frame_2
-                            and str(row.get("diff_threshold")) == str(pick.sweep.diff_threshold)
-                            and row.get("diff_mode") == pick.sweep.diff_mode
-                        ):
-                            row["diff_image"] = rel
-                if save_mode == "all":
-                    for row in rows:
-                        if row.get("folder") != folder_name:
+                        rel_hint = str(row.get("diff_image") or "")
+                        if rel_hint and rel_hint not in saved_rels:
+                            row["diff_image"] = ""
+                    for pick in picks if picks else []:
+                        if pick.pass_label != pass_label:
                             continue
-                        f1 = row.get("frame_1", "")
-                        f2 = row.get("frame_2", "")
-                        for rel in saved_rels:
-                            if rel.startswith(f"{folder_name}/") and f1 in rel and f2 in rel:
+                        rel = relative_diff_path(folder_name, pick.spec)
+                        for row in rows:
+                            if row.get("folder") != folder_name:
+                                continue
+                            if (
+                                row.get("frame_1") == pick.frame_1
+                                and row.get("frame_2") == pick.frame_2
+                                and str(row.get("diff_threshold")) == str(pick.sweep.diff_threshold)
+                                and row.get("diff_mode") == pick.sweep.diff_mode
+                            ):
                                 row["diff_image"] = rel
-                                break
-                write_csv(state["decode_csv"], rows)
+                    if save_mode == "all":
+                        for row in rows:
+                            if row.get("folder") != folder_name:
+                                continue
+                            f1 = row.get("frame_1", "")
+                            f2 = row.get("frame_2", "")
+                            for rel in saved_rels:
+                                if rel.startswith(f"{folder_name}/") and f1 in rel and f2 in rel:
+                                    row["diff_image"] = rel
+                                    break
+                    write_csv(state["decode_csv"], rows)
+
+    finally:
+        decode_executor.shutdown(wait=True)
 
     elapsed = time.perf_counter() - t0
     log_info(

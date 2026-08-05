@@ -1,4 +1,4 @@
-"""主解析 mid 一括: 厚いスイープを out_mid_MMDD に残す。"""
+"""日常用 mid_fast 一括解析: 軽いスイープを out_mid_fast_MMDD に残す。"""
 from __future__ import annotations
 
 import argparse
@@ -20,7 +20,7 @@ ALLOWED_RATES = {45, 60, 90, 120, 180}
 ALLOWED_EXPS = {250, 125, 60}
 ALLOWED_FLUORO = {0, 1}
 
-# run_pipeline_hully の mid 時 pass 一覧（binary 6 + gray *_num 4）
+# run_pipeline_hully の mid_fast 時 pass 一覧（binary 6 + gray *_num 4）
 HULLY_PASSES: Tuple[str, ...] = (
     "pair",
     "accum",
@@ -63,13 +63,12 @@ class VideoRunResult:
 def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     p = argparse.ArgumentParser(
         description=(
-            "R8/movie 内の動画を run_pipeline_hully で主解析 mid する（out_mid_MMDD）。"
-            "--mid-sweeps（pair±20・密 th・lockin phase 4/8/16・*_num）+ "
+            "R8/movie 内の動画を run_pipeline_hully で日常用 mid_fast 解析する（out_mid_fast_MMDD）。"
+            "--mid-fast-sweeps（pair±10・間引き th・lockin phase=8・*_num）+ "
             "--mid-search（gray+median_otsu, kernel 3/5/7, scale=1）。"
-            "軽い日常用は all_analyze_mid_fast.py（--mid-fast-sweeps）。"
             "生フレームは削除、差分 PNG は手法ごと代表1枚（per_pass）。"
             "phone_try は pass ごと top1 のみ。"
-            "未指定時の出力先は実行日の out_mid_MMDD（例: out_mid_0731）。"
+            "未指定時の出力先は実行日の out_mid_fast_MMDD（例: out_mid_fast_0805）。"
         )
     )
     p.add_argument("--movie-dir", type=str, default="")
@@ -78,7 +77,7 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         "--out-dir",
         type=str,
         default="",
-        help="run_pipeline_hully の --out-dir（未指定時: R8/analyze_code/out_mid_MMDD、MMDD=実行日）",
+        help="run_pipeline_hully の --out-dir（未指定時: R8/analyze_code/out_mid_fast_MMDD、MMDD=実行日）",
     )
     p.add_argument(
         "--full-search",
@@ -113,9 +112,9 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
 
 
 def default_out_dir_name(when: Optional[datetime] = None) -> str:
-    """実行日の out_mid_MMDD（例: out_mid_0731）。"""
+    """実行日の out_mid_fast_MMDD（例: out_mid_fast_0805）。"""
     stamp = when or datetime.now()
-    return f"out_mid_{stamp.strftime('%m%d')}"
+    return f"out_mid_fast_{stamp.strftime('%m%d')}"
 
 
 def default_paths() -> Tuple[Path, Path, Path]:
@@ -180,14 +179,14 @@ def has_cli_flag(args: Sequence[str], flag: str) -> bool:
     return any(arg == flag or arg.startswith(prefix) for arg in args)
 
 
-def build_mid_args(
+def build_mid_fast_args(
     video_path: Path,
     manifest_path: Path,
     out_dir: str,
     full_search: bool,
     shared_extra: Sequence[str],
 ) -> List[str]:
-    """mid 既定: 厚いスイープ + mid-search。差分 PNG は pass ごと代表1枚。"""
+    """mid_fast 既定: 軽いスイープ + mid-search。差分 PNG は pass ごと代表1枚。"""
     extra = list(shared_extra)
     if not has_cli_flag(extra, "--workers"):
         extra = ["--workers", "16", *extra]
@@ -196,11 +195,11 @@ def build_mid_args(
     if not has_cli_flag(extra, "--save-diff-maps"):
         extra = ["--save-diff-maps", "per_pass", *extra]
     if (
-        "--mid-sweeps" not in extra
-        and "--mid-fast-sweeps" not in extra
+        "--mid-fast-sweeps" not in extra
+        and "--mid-sweeps" not in extra
         and "--hard-sweeps" not in extra
     ):
-        extra = ["--mid-sweeps", *extra]
+        extra = ["--mid-fast-sweeps", *extra]
     if not has_cli_flag(extra, "--mid-search") and not has_cli_flag(extra, "--full-search"):
         if full_search:
             extra.append("--full-search")
@@ -226,7 +225,7 @@ def pass_safe_label(pass_label: str) -> str:
 def write_video_log(out_root: Path, captured: str) -> Path:
     logs_dir = out_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = logs_dir / "pass_hully_mid.log"
+    log_path = logs_dir / "pass_hully_mid_fast.log"
     log_path.write_text(captured or "", encoding="utf-8")
     return log_path
 
@@ -371,7 +370,7 @@ def run_one_video(
     full_search: bool,
     shared_extra: Sequence[str],
 ) -> Tuple[VideoRunResult, str]:
-    args = build_mid_args(video_path, manifest_path, out_dir, full_search, shared_extra)
+    args = build_mid_fast_args(video_path, manifest_path, out_dir, full_search, shared_extra)
     cmd = [sys.executable, str(pipeline_script), *args]
     out_root = resolve_out_root(video_path, out_dir, default_out)
     captured = ""
@@ -484,15 +483,15 @@ def main() -> int:
     )
     out_dir_arg = ns.out_dir.strip() if ns.out_dir.strip() else str(default_out.resolve())
     default_out = Path(out_dir_arg).resolve()
-    summary_path = default_out / "all_analyze_mid_summary.csv"
-    timing_path = default_out / "all_analyze_mid_timing.csv"
+    summary_path = default_out / "all_analyze_mid_fast_summary.csv"
+    timing_path = default_out / "all_analyze_mid_fast_timing.csv"
     pipeline_script = Path(__file__).resolve().parent / "run_pipeline_hully.py"
     cwd = Path(__file__).resolve().parent
 
     videos, rejected = discover_videos(movie_dir)
     print(
-        f"[INFO] mid(primary): videos={len(videos)} rejected={len(rejected)} "
-        f"pipeline=hully+mid-sweeps+mid-search+per_pass "
+        f"[INFO] mid_fast: videos={len(videos)} rejected={len(rejected)} "
+        f"pipeline=hully+mid-fast-sweeps+mid-search+per_pass "
         f"passes={list(HULLY_PASSES)} out={default_out}"
     )
     if rejected:
@@ -561,7 +560,7 @@ def main() -> int:
                 print(f"         {line}")
 
         if not ns.no_auto_git:
-            auto_commit_and_push(source="all_analyze_mid", detail=video_path.name)
+            auto_commit_and_push(source="all_analyze_mid_fast", detail=video_path.name)
 
     write_summary(summary_path, results)
     ok_count = sum(1 for r in results if r.status == "OK")
@@ -571,7 +570,7 @@ def main() -> int:
         f"summary={summary_path.resolve()} timing={timing_path.resolve()}"
     )
     if not ns.no_auto_git:
-        auto_commit_and_push(source="all_analyze_mid", detail="finished")
+        auto_commit_and_push(source="all_analyze_mid_fast", detail="finished")
     return 0 if fail_count == 0 else 1
 
 
