@@ -81,6 +81,67 @@ def classify_scalar_map(stat_map: np.ndarray, threshold: float):
     return changed, np.zeros_like(changed, dtype=bool), unchanged
 
 
+# lockin / fourier の正規化スコア二値化コード（diff_threshold に格納）
+# 20未満: 旧スケール th/255（mid/hard 互換）
+# 20〜100: 正規化[0,1]上のパーセント（30 → 0.30）
+# 901: Otsu / 902: adaptiveThreshold
+NORM_BIN_OTSU = 901
+NORM_BIN_ADAPTIVE = 902
+
+
+def format_norm_bin_label(threshold: int) -> str:
+    """差分サブディレクトリ用ラベル。"""
+    if int(threshold) == NORM_BIN_OTSU:
+        return "otsu"
+    if int(threshold) == NORM_BIN_ADAPTIVE:
+        return "adapt"
+    if int(threshold) >= 20:
+        return f"p{int(threshold)}"
+    return f"th{int(threshold)}"
+
+
+def binarize_normalized_score_map(score_map: np.ndarray, threshold: int) -> np.ndarray:
+    """正規化スコアマップ → 黒白 RGB。
+
+    - threshold < 20: 旧仕様（norm 後に th/255）。壊れたスケールだが mid/hard 互換のため残す
+    - 20..100: 正規化[0,1]上の固定閾値（percent/100）
+    - 901: Otsu（大域・自動）
+    - 902: adaptiveThreshold（局所）
+    """
+    from time_fft import normalize_score_map
+
+    import cv2
+
+    norm = normalize_score_map(np.asarray(score_map, dtype=np.float32))
+    code = int(threshold)
+
+    if code == NORM_BIN_OTSU:
+        # 高スコアを明るくして Otsu。明るい側をモジュール（出力黒）にする
+        gray_u8 = np.clip(np.rint(norm * 255.0), 0, 255).astype(np.uint8)
+        _, bw = cv2.threshold(gray_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        changed = bw == 255
+    elif code == NORM_BIN_ADAPTIVE:
+        gray_u8 = np.clip(np.rint(norm * 255.0), 0, 255).astype(np.uint8)
+        bw = cv2.adaptiveThreshold(
+            gray_u8,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            2,
+        )
+        changed = bw == 255
+    else:
+        if code >= 20:
+            th = float(code) / 100.0
+        else:
+            th = float(code) / 255.0
+        changed, _, _ = classify_scalar_map(norm, th)
+
+    unchanged = ~changed
+    return _diff_to_rgb(changed, np.zeros_like(changed, dtype=bool), unchanged)
+
+
 def pair_index_pairs(n_diffs: int, n_each: int) -> List[Tuple[int, int]]:
     """隣接 diff インデックス t → フレーム (t, t+1)。先頭/末尾 n_each。"""
     if n_diffs <= 0:
@@ -256,7 +317,7 @@ def generate_lockin_maps(
     repr_mode: str = "binary",
 ) -> List[MapSpec]:
     """d(t) への複素ロックイン振幅マップ。"""
-    from time_fft import format_freq_label, normalize_score_map
+    from time_fft import format_freq_label
 
     mode = "gray" if repr_mode == "gray" else "binary"
     freq_label = format_freq_label(target_freq)
@@ -264,15 +325,12 @@ def generate_lockin_maps(
     if mode == "gray":
         subdir = f"rgb_max_lockin_{freq_label}_ps{steps}_gray"
     else:
-        subdir = f"rgb_max_lockin_{freq_label}_ps{steps}_th{threshold}"
+        subdir = f"rgb_max_lockin_{freq_label}_ps{steps}_{format_norm_bin_label(threshold)}"
     score = lockin_map_from_diff(d_stack, fps, target_freq, phase_steps=steps)
     if mode == "gray":
         rgb = score_to_gray_rgb(score)
     else:
-        th = float(threshold) / 255.0
-        norm = normalize_score_map(score)
-        inc, dec, unch = classify_scalar_map(norm, th)
-        rgb = _diff_to_rgb(inc, dec, unch)
+        rgb = binarize_normalized_score_map(score, threshold)
     n = d_stack.shape[0]
     return [
         MapSpec(
@@ -297,14 +355,14 @@ def generate_fourier_maps(
     repr_mode: str = "binary",
 ) -> List[MapSpec]:
     """d(t) への帯付き FFT スコアマップ（target 近傍 / noise floor）。"""
-    from time_fft import build_score_map, format_freq_label, normalize_score_map
+    from time_fft import build_score_map, format_freq_label
 
     mode = "gray" if repr_mode == "gray" else "binary"
     freq_label = format_freq_label(target_freq)
     if mode == "gray":
         subdir = f"rgb_max_fourier_{freq_label}_gray"
     else:
-        subdir = f"rgb_max_fourier_{freq_label}_th{threshold}"
+        subdir = f"rgb_max_fourier_{freq_label}_{format_norm_bin_label(threshold)}"
     score = build_score_map(
         d_stack,
         fps=fps,
@@ -315,10 +373,7 @@ def generate_fourier_maps(
     if mode == "gray":
         rgb = score_to_gray_rgb(score)
     else:
-        th = float(threshold) / 255.0
-        norm = normalize_score_map(score)
-        inc, dec, unch = classify_scalar_map(norm, th)
-        rgb = _diff_to_rgb(inc, dec, unch)
+        rgb = binarize_normalized_score_map(score, threshold)
     n = d_stack.shape[0]
     return [
         MapSpec(

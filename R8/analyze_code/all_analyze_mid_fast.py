@@ -65,6 +65,7 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
         description=(
             "R8/movie 内の動画を run_pipeline_hully で日常用 mid_fast 解析する（out_mid_fast_MMDD）。"
             "--mid-fast-sweeps（pair±10・間引き th・lockin phase=8・*_num）+ "
+            "lockin/fourier binary は正規化スコア向け th（p30/p50/p70 + Otsu + adaptive）+ "
             "--mid-search（gray+median_otsu, kernel 3/5/7, scale=1）。"
             "生フレームは削除、差分 PNG は手法ごと代表1枚（per_pass）。"
             "phone_try は pass ごと top1 のみ。"

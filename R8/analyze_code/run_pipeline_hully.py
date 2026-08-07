@@ -125,8 +125,10 @@ MID_FAST_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 16, 24, 32)
 MID_FAST_WINDOW_NS_ACCUM: Tuple[int, ...] = (5,)
 MID_FAST_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
 MID_FAST_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
-MID_FAST_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (4, 8, 12)
-MID_FAST_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (4, 8, 12)
+# lockin/fourier binary: 正規化[0,1]上の固定% + Otsu + adaptive
+# （旧 4/8/12=th/255 はスケール崩壊のため使わない。コード意味は hully_diff.NORM_BIN_*）
+MID_FAST_DIFF_THRESHOLDS_LOCKIN: Tuple[int, ...] = (30, 50, 70, 901, 902)
+MID_FAST_DIFF_THRESHOLDS_FREQ: Tuple[int, ...] = (30, 50, 70, 901, 902)
 MID_FAST_PAIR_EACH_END = 10
 MID_FAST_FOURIER_BAND_RADIUS = 2
 MID_FAST_PHASE_STEPS: Tuple[int, ...] = (8,)
@@ -248,7 +250,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "日常用の軽い mid スイープ: pair±10・間引き th・lockin phase=8・"
-            "*_num・hard 周波数候補（all_analyze_mid_fast 用）"
+            "*_num・hard 周波数候補。"
+            "lockin/fourier binary は正規化[0,1]向け th "
+            "(30/50/70=0.30/0.50/0.70, 901=Otsu, 902=adaptive)"
+            "（all_analyze_mid_fast 用）"
         ),
     )
     p.add_argument(
