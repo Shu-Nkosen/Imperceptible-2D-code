@@ -66,16 +66,15 @@ def filter_target_freqs(
 
 
 def resolve_target_freqs_hard(rate_hz: int, camera_fps: float) -> List[float]:
-    """hard 用: rate/2・半分に加え rate/4・3rate/4・蛍光灯50/60Hz（折り畳み）も候補にする。
+    """hard 用: rate/2・半分に加え rate/4・3rate/4（折り畳み）も候補にする。
 
     折り畳み後に MIN_TARGET_FREQ_HZ 未満（≈DCの 0 / 0.1 Hz など）になった候補はスキップする。
+    蛍光灯 50/60 Hz は埋め込み周波数ではないため候補に含めない。
     """
     base = list(resolve_target_freqs(rate_hz, camera_fps))
     extras = [
         alias_to_nyquist(rate_hz / 4.0, camera_fps),
         alias_to_nyquist(3.0 * rate_hz / 4.0, camera_fps),
-        alias_to_nyquist(50.0, camera_fps),
-        alias_to_nyquist(60.0, camera_fps),
     ]
     return _dedupe_freqs(base + extras)
 

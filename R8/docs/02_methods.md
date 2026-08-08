@@ -59,7 +59,7 @@
 | 切り出し | 条件ブロックの 2〜4 秒 → **120フレーム** | |
 | 生フレーム | `--keep-frames 0` | d(t) 後に PNG 削除 |
 | 差分PNG保存 | `--save-diff-maps per_pass` | 手法ごと代表1枚 |
-| 周波数候補 | `resolve_target_freqs_hard` | rate/2・半分に加え rate/4・3rate/4・50/60Hz（エイリアス折り畳み）。2 Hz 未満は除外 |
+| 周波数候補 | `resolve_target_freqs_hard` | rate/2・半分に加え rate/4・3rate/4（エイリアス折り畳み）。2 Hz 未満は除外 |
 | fourier 帯域 | `MID_FOURIER_BAND_RADIUS = 2` | 目標ビンの前後幅 |
 | 採用規則 | 条件内で `pixel_acc_all` 最大 | 同点はデコード成功 → 小さい th → 小さい n → 第一候補周波数／位相 |
 
@@ -238,7 +238,7 @@ A=\sqrt{I^2+Q^2}
 |---|---|
 | `fourier_band_radius` | **2** |
 | `th` スイープ | **4, 6, 8, 10, 12, 16** |
-| 周波数候補 | hard セット（rate/2, 半分, rate/4, 3rate/4, 50/60Hz 折り畳み） |
+| 周波数候補 | hard セット（rate/2, 半分, rate/4, 3rate/4 折り畳み） |
 
 ラベル例: 30 Hz → `f30`、22.5 Hz → `f225`。
 
