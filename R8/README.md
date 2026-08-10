@@ -1,5 +1,6 @@
 # R8 sweep (表示→撮影→解析)
 
+**解析手法の説明（パイプライン・差分手法・評価指標）:** [`docs/`](docs/README.md) を参照。  
 **コマンド早見表:** 表示パターンと解析パターンをコマンドとセットでまとめたものは [`command.md`](command.md) を参照。
 
 ## 命名規則（動画ファイル）
@@ -479,7 +480,7 @@ python R8/analyze_code/all_analyze_hard.py
   - `pair_each_end=0`（全隣接ペア）
   - 閾値・accum 窓・lockin phase を密に
   - fourier `band_radius=2`
-  - 周波数: rate/2・半分に加え rate/4・3rate/4・50/60Hz（折り畳み）。DC 2Hz未満は除外
+  - 周波数: rate/2・半分に加え rate/4・3rate/4（折り畳み）。DC 2Hz未満は除外
   - **pair以外の `*_num`**（`stat_var_num` なし）
 - 既定: `--keep-frames 0`、`--save-diff-maps top5`
 - ログ: `logs/pass_hully_hard.log` + `logs/pass_index.csv`
