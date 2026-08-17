@@ -1,0 +1,13 @@
+{
+  "files.exclude": {
+    "make_movie": true
+  },
+  "files.watcherExclude": {
+    "make_movie/**": true,
+    "**/Imperceptible-2D-code/make_movie/**": true
+  },
+  "search.exclude": {
+    "make_movie": true,
+    "make_movie/**": true
+  }
+}

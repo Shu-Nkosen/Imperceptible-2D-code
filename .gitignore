@@ -20,48 +20,9 @@ R8/analyze_code/out_mid_*/**/*.png
 
 
 
-make_movie/1022/*.png
-make_movie/frames2-ex-1/*.png
-make_movie/frames2-ex-1/frame_diff_analysis
-make_movie/1107/*.jpg
-make_movie/1111/*.JPG
-make_movie/1111/frames20251111/*.png
-make_movie/1111/frame_diff_analysis/*.png
-make_movie/1111/frames20251111/frame_diff_analysis/
-make_movie/movie_frame_2_4/*.png
-make_movie/1119/*.JPG
-make_movie/1119/60_frame_diff_analysis/
-make_movie/1119/frames20251119_60/*.png
-make_movie/1119/frames20251119_60/frame_diff_analysis/
-make_movie/1119/250_frame_diff_analysis/
-make_movie/1119/frames20251119_250/*.png
-make_movie/1119/frames20251119_250/frame_diff_analysis_Y/
-make_movie/1119/frames20251119_250/rgb_max_diff_maps/
-make_movie/movie_frame_2_4/done
-make_movie/1218
-make_movie/1229
-make_movie/1229te
-make_movie/1230/*.png
-make_movie/1230/*/*.png
-make_movie/1230/*/*/*.png
-make_movie/1231/*.png
-make_movie/1231/*/*.png
-make_movie/1231/*/*/*.png
-make_movie/1231/*.mp4
-make_movie/0227/*/*.png
-make_movie/0227/*/*/*.png
-make_movie/02272/*/*.png
-make_movie/02272/*/*/*.png
-make_movie/0305/*/*/*.png
-make_movie/0305/*/*/*/*.png
-
-
-make_movie/movie_em1/*.png
-make_movie/movie_em14/*.png
-make_movie/movie_em15/*.png
-make_movie/movie_em15/*/*.png
-
-/make_movie/cut_frame/
+# Root experiment frames only (do not match R8/make_movie).
+# Already-tracked scripts under /make_movie stay tracked; git skips the 160k frames.
+/make_movie/
 
 other
 0118/
@@ -112,7 +73,8 @@ ave/
 notification.mp3
 /SwinIR
 /textual_inversion
-.vscode
+.vscode/*
+!.vscode/settings.json
 /extensions
 /test/stdout.txt
 /test/stderr.txt
