@@ -122,7 +122,7 @@ MID_PHASE_STEPS: Tuple[int, ...] = (4, 8, 16)
 # --mid-fast-sweeps: 日常用（デコード枚数≈1/4 相当に間引き。all_analyze_mid_fast 用）
 MID_FAST_DIFF_THRESHOLDS_PAIR: Tuple[int, ...] = (4, 8, 12)
 MID_FAST_DIFF_THRESHOLDS_ACCUM: Tuple[int, ...] = (8, 16, 24, 32)
-MID_FAST_WINDOW_NS_ACCUM: Tuple[int, ...] = (5,)
+MID_FAST_WINDOW_NS_ACCUM: Tuple[int, ...] = (5, 120)  # 短窓 + 全長（ANALYSIS_FRAME_COUNT）
 MID_FAST_DIFF_THRESHOLDS_STAT_STD: Tuple[int, ...] = (4, 8, 12)  # 弱手法のため広げない
 MID_FAST_DIFF_THRESHOLDS_STAT_VAR: Tuple[int, ...] = (1, 2)  # 弱手法・データ少なく
 # lockin/fourier binary: 正規化[0,1]上の固定% + Otsu + adaptive

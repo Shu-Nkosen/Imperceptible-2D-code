@@ -11,7 +11,7 @@ import time
 from argparse import Namespace
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from decode_qr_from_all_frames import (
     DEFAULT_MEDIAN_ITERATIONS,
@@ -582,6 +582,7 @@ def process_video(
     pass_labels: Sequence[str],
     dry_run: bool,
     ns: argparse.Namespace,
+    sweep_filter: Optional[Callable[[SweepKey], bool]] = None,
 ) -> VideoStats:
     t0 = time.perf_counter()
     out_root = out_dir / stem
@@ -661,6 +662,8 @@ def process_video(
         expected, target_freqs = build_sweeps(
             diff_mode, stat_kind, hully_ns, meta, fps, repr_mode=repr_mode
         )
+        if sweep_filter is not None:
+            expected = [s for s in expected if sweep_filter(s)]
         _, sweep_csv, _, _ = pass_output_paths(out_root, pass_label)
         existing = read_csv_dicts(sweep_csv)
         missing = list_missing_sweeps(expected, existing, folders)
