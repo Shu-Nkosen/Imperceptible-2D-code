@@ -29,7 +29,7 @@ rice_B_12,QR未検出,,accum,5,,,32,0.648317,,0.648778,frame_00030.png,frame_000
 nagaoka_fireworks_B_4,QR未検出,,accum,5,,,32,0.647970,,0.648675,frame_00055.png,frame_00059.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,27,nagaoka_fireworks,B,B,4,,,frame_00115.png,frame_00119.png,,120,1.999913
 nagaoka_fireworks_B_8,QR未検出,,accum,5,,,32,0.648232,,0.648876,frame_00000.png,frame_00004.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,28,nagaoka_fireworks,B,B,8,,,frame_00100.png,frame_00104.png,,120,1.999913
 nagaoka_fireworks_B_12,QR未検出,,accum,5,,,32,0.647763,,0.648566,frame_00030.png,frame_00034.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,29,nagaoka_fireworks,B,B,12,,,frame_00115.png,frame_00119.png,,120,1.999913
-hocho_B_4,QR未検出,,accum,5,,,32,0.647922,,0.649632,frame_00100.png,frame_00104.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,30,hocho,B,B,4,,,frame_00115.png,frame_00119.png,,120,1.999913
+hocho_B_4,QR未検出,,accum,120,,,8,0.648656,,0.648656,frame_00000.png,frame_00119.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,30,hocho,B,B,4,,,frame_00000.png,frame_00119.png,QR未検出,120,1.999913
 hocho_B_8,QR未検出,,accum,5,,,32,0.647955,,0.649079,frame_00085.png,frame_00089.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,31,hocho,B,B,8,,,frame_00115.png,frame_00119.png,,120,1.999913
 hocho_B_12,QR未検出,,accum,5,,,16,0.695082,,0.704594,frame_00100.png,frame_00104.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,32,hocho,B,B,12,,,frame_00115.png,frame_00119.png,,120,1.999913
 ex_B_4,QR未検出,,accum,5,,,32,0.648508,,0.649151,frame_00045.png,frame_00049.png,r120_e250_f1.mp4,120 Hz,1/250,蛍光灯あり,60.003 fps,120,250,1,33,ex,B,B,4,,,frame_00100.png,frame_00104.png,,120,1.999913
