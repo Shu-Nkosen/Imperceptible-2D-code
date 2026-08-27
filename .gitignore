@@ -25,6 +25,7 @@ R8/analyze_code/out/**/*.png
 R8/analyze_code/out_hard/**/*.png
 R8/analyze_code/out_mid/**/*.png
 R8/analyze_code/out_mid_*/**/*.png
+R8/analyze_code/out_verify_decode/
 
 # Root experiment frames only (do not match R8/make_movie).
 # Already-tracked scripts under /make_movie stay tracked; git skips the 160k frames.
