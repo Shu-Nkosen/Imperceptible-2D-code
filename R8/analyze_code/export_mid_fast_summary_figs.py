@@ -24,6 +24,21 @@ plt.rcParams["axes.axisbelow"] = True
 ROOT = Path(__file__).resolve().parent / "out_mid_fast_0805"
 OUT = ROOT / "summary_slides"
 
+from family_labels import (
+    FAMILY_JP,
+    LABEL_BINARY,
+    LABEL_FLUORO_OFF,
+    LABEL_FLUORO_ON,
+    LABEL_GRAY,
+    LABEL_INTENSITY,
+    METRIC_ANY_SUCCESS,
+    METRIC_ANY_SUCCESS_PCT,
+    TALK_FAMILIES,
+    accum_sweep_keep,
+    jp_channels,
+    jp_family,
+)
+
 PASS_TO_FAMILY = {
     "pair": "pair",
     "accum": "accum",
@@ -86,7 +101,7 @@ def rate_of(rows: list[dict], key: str = "any_ok") -> float:
 def heatmap(ax, matrix, title, images, channels, vmax):
     im = ax.imshow(matrix, cmap="YlOrRd", vmin=0, vmax=vmax, aspect="auto")
     ax.set_xticks(range(len(channels)))
-    ax.set_xticklabels(channels)
+    ax.set_xticklabels(jp_channels(channels))
     ax.set_yticks(range(len(images)))
     labels = [jp_image(name) for name in images]
     ax.set_yticklabels(labels)
@@ -138,80 +153,37 @@ def load_texture_gray() -> dict[str, float]:
 
 
 def plot_color_distribution(out_dir: Path) -> None:
-    """画像ごとの色の強さ（平均RGB・支配チャネル・ヒストグラム）."""
+    """画像ごとのテクスチャ（07）と RGB ヒストグラム（08）."""
     import cv2
 
     stats = load_color_stats()
     texture = load_texture_gray()
     images = [name for name in IMAGE_ORDER if name in stats]
 
-    # --- 07: mean RGB + max occupancy + texture ---
-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.8))
-
-    ax = axes[0]
+    # --- 07: テクスチャのみ（大きい単一棒グラフ）---
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    fs_t, fs_l, fs_tick, fs_val = 18, 15, 14, 16
     x = np.arange(len(images))
-    w = 0.25
-    for i, (ch, color) in enumerate(
-        (("R", "#d62828"), ("G", "#2a9d8f"), ("B", "#1d3557"))
-    ):
-        vals = [stats[img][ch] for img in images]
-        ax.bar(x + (i - 1) * w, vals, w, label=ch, color=color)
-    ax.set_xticks(x)
-    ax.set_xticklabels([jp_image(n) for n in images], fontsize=12)
-    for tick, name in zip(ax.get_xticklabels(), images):
-        tick.set_color(IMAGE_THEME[name])
-        tick.set_fontweight("bold")
-    ax.set_ylabel("平均輝度 (0–255)")
-    ax.set_title("QR黒領域のチャネル平均")
-    ax.set_ylim(0, 255)
-    ax.legend(frameon=False, ncol=3)
-
-    ax = axes[1]
-    r_share = [stats[img].get("max_is_R", 0) * 100 for img in images]
-    g_share = [stats[img].get("max_is_G", 0) * 100 for img in images]
-    b_share = [stats[img].get("max_is_B", 0) * 100 for img in images]
-    ax.bar(x, r_share, label="Rが最大", color="#d62828")
-    ax.bar(x, g_share, bottom=r_share, label="Gが最大", color="#2a9d8f")
-    ax.bar(
-        x,
-        b_share,
-        bottom=[a + b for a, b in zip(r_share, g_share)],
-        label="Bが最大",
-        color="#1d3557",
-    )
-    ax.set_xticks(x)
-    ax.set_xticklabels([jp_image(n) for n in images], fontsize=12)
-    for tick, name in zip(ax.get_xticklabels(), images):
-        tick.set_color(IMAGE_THEME[name])
-        tick.set_fontweight("bold")
-    ax.set_ylabel("画素割合 (%)")
-    ax.set_title("支配チャネル（max占有）")
-    ax.set_ylim(0, 100)
-    ax.legend(frameon=False, fontsize=9)
-
-    ax = axes[2]
     grads = [texture.get(img, 0.0) for img in images]
     ax.bar(
         x,
         grads,
         color=[IMAGE_THEME[n] for n in images],
         edgecolor="white",
+        width=0.62,
     )
     ax.set_xticks(x)
-    ax.set_xticklabels([jp_image(n) for n in images], fontsize=12)
+    ax.set_xticklabels([jp_image(n) for n in images], fontsize=fs_tick)
     for tick, name in zip(ax.get_xticklabels(), images):
         tick.set_color(IMAGE_THEME[name])
         tick.set_fontweight("bold")
-    ax.set_ylabel("勾配平均")
-    ax.set_title("空間テクスチャ（gray勾配）")
+    ax.set_ylabel("テクスチャ", fontsize=fs_l)
+    ax.set_title("テクスチャ（模様の細かさ／QR黒領域の明暗変化の平均）", fontsize=fs_t, pad=10)
     for i, v in enumerate(grads):
-        ax.text(i, v + 1.5, f"{v:.1f}", ha="center", fontsize=10)
-
-    fig.suptitle(
-        "埋め込み元画像の色の強さ・分布（QR黒領域 / clip_margin=12）",
-        fontsize=14,
-        y=1.03,
-    )
+        ax.text(i, v + 1.8, f"{v:.1f}", ha="center", fontsize=fs_val, fontweight="bold")
+    ax.tick_params(labelsize=fs_tick)
+    ax.set_ylim(0, max(grads) * 1.22)
+    fig.tight_layout()
     fig.savefig(out_dir / "07_image_color_strength.png")
     plt.close(fig)
 
@@ -282,8 +254,12 @@ def main() -> None:
             by_folder: dict[str, list[dict]] = defaultdict(list)
             with path.open(encoding="utf-8-sig", newline="") as f:
                 for row in csv.DictReader(f):
+                    if pass_name in ("accum", "accum_num") and not accum_sweep_keep(row):
+                        continue
                     by_folder[row["folder"]].append(row)
             for folder, sweeps in by_folder.items():
+                if not sweeps:
+                    continue
                 any_ok = 0
                 adopted_ok = 0
                 adopted_acc = None
@@ -374,8 +350,9 @@ def main() -> None:
     payload = {
         "source": "out_mid_fast_0805",
         "note": (
-            "any-success = condition has >=1 decode_success sweep; "
-            "family ORs binary+num. Includes re_analyze_mid_fast lockin/fourier sweeps."
+            "復号成功率＝条件のうちスイープのいずれかで decode_success=1 の割合。"
+            "手法は二値化と濃淡の OR（積算は窓5のみ）。"
+            "re_analyze_mid_fast により lockin/fourier スイープを追記済み。"
         ),
         "n_stems": len(stems),
         "n_conditions": 1800,
@@ -477,16 +454,17 @@ def main() -> None:
                     w.writerow([img, ch, f"{payload[key][img][ch]:.4f}"])
 
     # figures
-    order = sorted(FAMILIES, key=lambda fam: fam_any[fam], reverse=True)
+    talk_any = {fam: fam_any[fam] for fam in TALK_FAMILIES}
+    order = sorted(TALK_FAMILIES, key=lambda fam: talk_any[fam], reverse=True)
     fig, ax = plt.subplots(figsize=(10, 5.2))
     ys = np.arange(len(order))
     vals = [fam_any[f] for f in order]
     bars = ax.barh(ys, vals, color=[C[f] for f in order], edgecolor="white", height=0.7)
     ax.set_yticks(ys)
-    ax.set_yticklabels(order, fontsize=12)
-    ax.set_xlabel("any-success（%）", fontsize=12)
+    ax.set_yticklabels([jp_family(f) for f in order], fontsize=12)
+    ax.set_xlabel(METRIC_ANY_SUCCESS_PCT, fontsize=12)
     ax.set_title(
-        "手法系統ごとの QR デコード any-success\n（out_mid_fast_0805、条件数 n=1800）",
+        "手法別 QR 復号成功率\n（条件数 n=1800、5フレーム積算は窓5のみ）",
         fontsize=13,
     )
     ax.set_xlim(0, max(vals) * 1.25)
@@ -507,12 +485,15 @@ def main() -> None:
     w = 0.36
     bin_vals = [pass_any[b] for _, b, _ in pairs]
     num_vals = [pass_any[n] for _, _, n in pairs]
-    ax.bar(x - w / 2, bin_vals, w, label="binary", color="#1f4e79")
-    ax.bar(x + w / 2, num_vals, w, label="num (gray)", color="#2a9d8f")
+    ax.bar(x - w / 2, bin_vals, w, label=LABEL_BINARY, color="#1f4e79")
+    ax.bar(x + w / 2, num_vals, w, label=LABEL_GRAY, color="#2a9d8f")
     ax.set_xticks(x)
-    ax.set_xticklabels([p[0] for p in pairs], fontsize=12)
-    ax.set_ylabel("any-success（%）")
-    ax.set_title("binary と num（gray）の any-success 比較\n（fourier binary は旧 th/255 でほぼ無効）")
+    ax.set_xticklabels([jp_family(p[0]) for p in pairs], fontsize=11)
+    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
+    ax.set_title(
+        f"{LABEL_BINARY}と{LABEL_GRAY}の復号成功率の比較\n"
+        "（5フレーム積算は窓5のみ。時間FFTの二値化は旧 th/255 でほぼ無効）"
+    )
     ax.legend(frameon=False)
     for i, (bv, nv) in enumerate(zip(bin_vals, num_vals)):
         ax.text(i - w / 2, bv + 0.2, f"{bv:.1f}", ha="center", fontsize=9)
@@ -521,47 +502,57 @@ def main() -> None:
     plt.close(fig)
 
     key_fams = ["accum", "lockin", "fourier", "pair"]
-    fig, ax = plt.subplots(figsize=(11, 5.5))
+    fig, ax = plt.subplots(figsize=(10.5, 5.4))
     x = np.arange(len(rates))
     w = 0.2
     for i, fam in enumerate(key_fams):
         vals = [payload["family_any_by_rate"][fam][str(r)] for r in rates]
-        ax.bar(x + (i - 1.5) * w, vals, w, label=fam, color=C[fam])
+        ax.bar(x + (i - 1.5) * w, vals, w, label=jp_family(fam), color=C[fam])
     ax.set_xticks(x)
-    ax.set_xticklabels([str(r) for r in rates])
-    ax.set_xlabel("表示レート [Hz]")
-    ax.set_ylabel("any-success（%）")
-    ax.set_title("表示レート別 any-success（主要系統）")
-    ax.legend(frameon=False, ncol=4)
+    ax.set_xticklabels([str(r) for r in rates], fontsize=14)
+    ax.set_xlabel("表示の切替速さ [Hz]", fontsize=14)
+    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=14)
+    ax.set_title("表示速さ別 復号成功率", fontsize=16)
+    ax.legend(frameon=False, ncol=2, fontsize=12)
+    ax.tick_params(labelsize=13)
     fig.savefig(OUT / "03_by_rate.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     x = np.arange(len(exps))
+    all_vals: list[float] = []
     for i, fam in enumerate(key_fams):
         vals = [payload["family_any_by_exp"][fam][str(e)] for e in exps]
-        ax.bar(x + (i - 1.5) * w, vals, w, label=fam, color=C[fam])
+        all_vals.extend(vals)
+        ax.bar(x + (i - 1.5) * w, vals, w, label=jp_family(fam), color=C[fam])
     ax.set_xticks(x)
-    ax.set_xticklabels([f"1/{e}" for e in exps])
-    ax.set_xlabel("露光")
-    ax.set_ylabel("any-success（%）")
-    ax.set_title("露光別 any-success")
-    ax.legend(frameon=False, ncol=4)
+    ax.set_xticklabels([f"1/{e}" for e in exps], fontsize=14)
+    ax.set_xlabel("露光", fontsize=14)
+    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=14)
+    ax.set_title("露光別 復号成功率", fontsize=16)
+    finite = [v for v in all_vals if np.isfinite(v)]
+    ymax = max(finite) if finite else 1.0
+    ax.set_ylim(0, max(ymax * 1.45, ymax + 8.0))
+    ax.legend(frameon=False, ncol=2, fontsize=12, loc="upper right")
+    ax.tick_params(labelsize=13)
     fig.savefig(OUT / "04_by_exposure.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    x = np.arange(len(FAMILIES))
+    x = np.arange(len(TALK_FAMILIES))
     w = 0.36
-    f0 = [payload["family_any_by_fluoro"][f]["f0"] for f in FAMILIES]
-    f1 = [payload["family_any_by_fluoro"][f]["f1"] for f in FAMILIES]
-    ax.bar(x - w / 2, f0, w, label="f0（蛍光灯なし）", color="#8d99ae")
-    ax.bar(x + w / 2, f1, w, label="f1（蛍光灯あり）", color="#ef233c")
+    f0 = [payload["family_any_by_fluoro"][f]["f0"] for f in TALK_FAMILIES]
+    f1 = [payload["family_any_by_fluoro"][f]["f1"] for f in TALK_FAMILIES]
+    ax.bar(x - w / 2, f0, w, label=LABEL_FLUORO_OFF, color="#8d99ae")
+    ax.bar(x + w / 2, f1, w, label=LABEL_FLUORO_ON, color="#ef233c")
     ax.set_xticks(x)
-    ax.set_xticklabels(FAMILIES, rotation=15)
-    ax.set_ylabel("any-success（%）")
-    ax.set_title("蛍光灯 ON/OFF 別 any-success")
-    ax.legend(frameon=False)
+    ax.set_xticklabels([jp_family(f) for f in TALK_FAMILIES], rotation=15, fontsize=13)
+    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=14)
+    ax.set_title("蛍光灯の有無別 復号成功率", fontsize=16)
+    fluoro_max = max(max(f0), max(f1)) if f0 and f1 else 1.0
+    ax.set_ylim(0, max(fluoro_max * 1.35, fluoro_max + 4.0))
+    ax.legend(frameon=False, fontsize=12, loc="upper right")
+    ax.tick_params(labelsize=13)
     fig.savefig(OUT / "05_by_fluoro.png")
     plt.close(fig)
 
@@ -574,12 +565,12 @@ def main() -> None:
     ]
     vmax = max(max(max(r) for r in mat_pair), max(max(r) for r in mat_acc))
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-    heatmap(axes[0], mat_pair, "pair の any-success（%）", images, channels, vmax)
+    heatmap(axes[0], mat_pair, f"{jp_family('pair')} の復号成功率（%）", images, channels, vmax)
     im1 = heatmap(
-        axes[1], mat_acc, "accum（系統）の any-success（%）", images, channels, vmax
+        axes[1], mat_acc, f"{jp_family('accum')} の復号成功率（%）", images, channels, vmax
     )
-    fig.colorbar(im1, ax=axes.ravel().tolist(), shrink=0.85, label="%")
-    fig.suptitle("画像×チャネル別 any-success", fontsize=13, y=1.02)
+    fig.colorbar(im1, ax=axes.ravel().tolist(), shrink=0.85, label=METRIC_ANY_SUCCESS_PCT)
+    fig.suptitle("画像×チャネル別 復号成功率", fontsize=13, y=1.02)
     fig.savefig(OUT / "06_image_channel_heatmap.png")
     plt.close(fig)
 
@@ -607,11 +598,11 @@ def main() -> None:
         color=[C[f] for f in order],
     )
     ax1.set_yticks(range(len(order)))
-    ax1.set_yticklabels(order)
+    ax1.set_yticklabels([jp_family(f) for f in order])
     ax1.invert_yaxis()
-    ax1.set_xlabel("%")
+    ax1.set_xlabel(METRIC_ANY_SUCCESS_PCT)
     ax1.set_xlim(pct_ylim)
-    ax1.set_title("系統別 any-success")
+    ax1.set_title("手法別 復号成功率")
 
     ax2 = fig.add_subplot(gs[0, 1])
     for fam in key_fams:
@@ -619,11 +610,11 @@ def main() -> None:
             rates,
             [payload["family_any_by_rate"][fam][str(r)] for r in rates],
             marker="o",
-            label=fam,
+            label=jp_family(fam),
             color=C[fam],
         )
     ax2.set_xlabel("レート [Hz]")
-    ax2.set_ylabel("%")
+    ax2.set_ylabel(METRIC_ANY_SUCCESS_PCT)
     ax2.set_ylim(pct_ylim)
     ax2.set_title("レート別")
     ax2.legend(frameon=False, fontsize=8)
@@ -636,21 +627,21 @@ def main() -> None:
             x + (i - 1.5) * w,
             [payload["family_any_by_exp"][fam][str(e)] for e in exps],
             w,
-            label=fam,
+            label=jp_family(fam),
             color=C[fam],
         )
     ax3.set_xticks(x)
     ax3.set_xticklabels([f"1/{e}" for e in exps])
     ax3.set_ylim(pct_ylim)
-    ax3.set_ylabel("%")
+    ax3.set_ylabel(METRIC_ANY_SUCCESS_PCT)
     ax3.set_title("露光別")
     ax3.legend(frameon=False, fontsize=8, ncol=2)
 
     ax4 = fig.add_subplot(gs[1, 1])
-    im = heatmap(ax4, mat_acc, "accum：画像×チャネル（%）", images, channels, vmax)
+    im = heatmap(ax4, mat_acc, f"{jp_family('accum')}：画像×チャネル（%）", images, channels, vmax)
     fig.colorbar(im, ax=ax4, fraction=0.046, pad=0.04)
     fig.suptitle(
-        "mid_fast_0805 スナップショット（any-success）／n=1800／re_analyze後",
+        "実験概要（復号成功率）／n=1800／5フレーム積算は窓5",
         fontsize=14,
     )
     fig.savefig(OUT / "00_overview.png")
@@ -661,13 +652,48 @@ def main() -> None:
     # also write Japanese name map into metrics
     payload["image_labels_ja"] = IMAGE_JP
     payload["image_theme_colors"] = IMAGE_THEME
+    payload["family_labels_ja"] = FAMILY_JP
+    payload["metric_labels_ja"] = {
+        "any_success": METRIC_ANY_SUCCESS,
+        "any_success_pct": METRIC_ANY_SUCCESS_PCT,
+        "binary": LABEL_BINARY,
+        "gray": LABEL_GRAY,
+        "intensity": LABEL_INTENSITY,
+    }
+    payload["accum_window_n"] = 5
+    # pair vs accum(w5) exclusive successes
+    pair_by = {(r["stem"], r["folder"]): r["any_ok"] for r in family_rows["pair"]}
+    accum_by = {(r["stem"], r["folder"]): r["any_ok"] for r in family_rows["accum"]}
+    only_accum = only_pair = both = 0
+    for k in pair_by:
+        p_ok = pair_by[k]
+        a_ok = accum_by.get(k, 0)
+        if a_ok and not p_ok:
+            only_accum += 1
+        elif p_ok and not a_ok:
+            only_pair += 1
+        elif p_ok and a_ok:
+            both += 1
+    payload["pair_vs_accum_w5"] = {
+        "only_accum": only_accum,
+        "only_pair": only_pair,
+        "both": both,
+        "pair_pct": fam_any["pair"],
+        "accum_pct": fam_any["accum"],
+    }
     (OUT / "metrics.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     readme = """# mid_fast_0805 スライド用図
 
-Source: `R8/analyze_code/out_mid_fast_0805`（30 stems × 60 conditions = 1800）。
+データ元: `R8/analyze_code/out_mid_fast_0805`（30条件 × 60組み合わせ = 1800）。
+
+## 手法ラベル（日本語）
+- pair → **2フレーム差分**
+- accum → **5フレーム積算**（窓5フレームの二値化∨濃淡のみ。全長120は含めない）
+- lockin → **同期検波**
+- fourier → **時間FFT**
 
 ## 画像ラベル（日本語）
 - ex → **実験**（青）
@@ -676,13 +702,13 @@ Source: `R8/analyze_code/out_mid_fast_0805`（30 stems × 60 conditions = 1800�
 - rice → **自然**（緑）
 
 ## 指標
-- **any-success**: 条件のうち、スイープのどれかで `decode_success=1` の割合
-- **family**: binary と `*_num` の OR
-- **adopted**: `pixel_acc_all` 最大スイープでの成功
+- **復号成功率**: 条件のうち、スイープのどれかでデコード成功した割合
+- **手法**: 二値化と濃淡の OR（積算は窓5のみ）
+- **採用スイープ**: 画素一致率が最大のスイープでの成功
 
 ## 注意
-`re_analyze_mid_fast` により lockin/fourier の不足スイープを追記済み。
-Fourier binary に旧 th/255 行が残る場合あり（系統 fourier は binary+num の OR）。
+`re_analyze_mid_fast` により同期検波・時間FFTの不足スイープを追記済み。
+時間FFTの二値化に旧 th/255 行が残る場合あり（手法は二値化+濃淡の OR）。
 
 ## ファイル
 - `00_overview.png` … 一枚もの
@@ -692,7 +718,7 @@ Fourier binary に旧 th/255 行が残る場合あり（系統 fourier は binar
 - `04_by_exposure.png`
 - `05_by_fluoro.png`
 - `06_image_channel_heatmap.png`
-- `07_image_color_strength.png` … 色の強さ（平均・支配チャネル・テクスチャ）
+- `07_image_color_strength.png` … テクスチャ（模様の細かさ／QR黒領域の明暗変化の平均）
 - `08_image_rgb_histograms.png` … 元画像 RGB ヒストグラム
 - `metrics.json` / `*.csv`
 """

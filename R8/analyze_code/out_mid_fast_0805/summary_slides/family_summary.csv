@@ -1,7 +1,0 @@
-﻿family,any_success_pct,adopted_decode_pct,mean_adopted_pixel_acc
-pair,7.2778,6.6667,0.737726
-accum,10.8889,9.8889,0.765557
-stat_std,7.0556,6.3333,0.771532
-stat_var,1.5000,1.4444,0.696186
-lockin,9.9444,7.8889,0.797077
-fourier,9.4444,7.3889,0.790364

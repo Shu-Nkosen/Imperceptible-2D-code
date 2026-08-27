@@ -3,6 +3,18 @@ stable_diffusion/
 *.zip
 *.mp4
 *.exe
+*.pdf
+*.pptx
+
+# R8 talk slides / personal & temp (presentation content stays out of git)
+R8/_tmp_slide_assets/
+R8/analyze_code/**/AI_HANDOFF*
+R8/analyze_code/build_ai_handoff.py
+R8/analyze_code/export_talk_*.py
+R8/analyze_code/**/make_*pptx*.py
+R8/analyze_code/**/*talk*pptx*
+R8/analyze_code/out_mid_*/summary_slides/
+~$*
 
 ## R8 generated assets (keep base images like rice.png tracked)
 R8/make_movie/*_*_normal*.png
@@ -13,12 +25,6 @@ R8/analyze_code/out/**/*.png
 R8/analyze_code/out_hard/**/*.png
 R8/analyze_code/out_mid/**/*.png
 R8/analyze_code/out_mid_*/**/*.png
-
-
-
-
-
-
 
 # Root experiment frames only (do not match R8/make_movie).
 # Already-tracked scripts under /make_movie stay tracked; git skips the 160k frames.
