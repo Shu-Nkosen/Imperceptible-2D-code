@@ -1,0 +1,7 @@
+﻿folder,frame_1,frame_2,diff_image,analysis_image,decoded_text,success,method,note,recall,precision,accuracy,noise,gt_note,task_key,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold
+rice_R_4,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.094537,0.382403,0.611692,0.084544,,stat_std:stat:std:None:None:4:None:binary:0,stat,,std,,4
+rice_R_4,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.001325,0.282520,0.632280,0.005443,,stat_std:stat:std:None:None:8:None:binary:0,stat,,std,,8
+rice_R_4,frame_00000.png,frame_00119.png,rice_R_4/rgb_max_stat_std_th12/00000-00119-FRAME_rgbmax_scale1.00.png,,,0,decode失敗,QR未検出,0.000186,0.453488,0.633015,0.000052,,stat_std:stat:std:None:None:12:None:binary:0,stat,,std,,12
+rice_R_8,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.294354,0.408192,0.584439,0.127906,,stat_std:stat:std:None:None:4:None:binary:0,stat,,std,,4
+rice_R_8,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.031025,0.410407,0.628058,0.011980,,stat_std:stat:std:None:None:8:None:binary:0,stat,,std,,8
+rice_R_8,frame_00000.png,frame_00119.png,,,,0,decode失敗,QR未検出,0.001874,0.620853,0.633297,0.000326,,stat_std:stat:std:None:None:12:None:binary:0,stat,,std,,12

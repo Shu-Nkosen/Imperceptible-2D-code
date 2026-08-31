@@ -1,0 +1,22 @@
+﻿folder,decode_note,decode_variant,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold,pixel_acc_all,pixel_acc_ok,pixel_acc_best,best_pair_frame_1,best_pair_frame_2,video,display_rate,exposure,fluorescent,camera_fps,cond,image,channel,token,intensity,decode_decoded_text,decode_method,decode_frame_1,decode_frame_2,note,analysis_frames,extract_sec
+rice_R_4,QR未検出,,stat,,std,,12,0.693109,,0.693109,frame_00000.png,frame_00119.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.959 fps,0,rice,R,R,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+rice_R_8,QR未検出,,stat,,std,,4,0.864161,,0.864161,frame_00000.png,frame_00119.png,,,,,,1,rice,R,R,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+rice_R_12,QR未検出,,stat,,std,,12,0.696278,,0.696278,frame_00000.png,frame_00119.png,,,,,,2,rice,R,R,12,,,frame_00000.png,frame_00119.png,,120,2.001357
+nagaoka_fireworks_R_4,QR未検出,,stat,,std,,12,0.574716,,0.574716,frame_00000.png,frame_00119.png,,,,,,3,nagaoka_fireworks,R,R,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+nagaoka_fireworks_R_8,QR未検出,,stat,,std,,4,0.850526,,0.850526,frame_00000.png,frame_00119.png,,,,,,4,nagaoka_fireworks,R,R,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+nagaoka_fireworks_R_12,QR未検出,,stat,,std,,12,0.870722,,0.870722,frame_00000.png,frame_00119.png,,,,,,5,nagaoka_fireworks,R,R,12,,,frame_00000.png,frame_00119.png,,120,2.001357
+hocho_R_4,QR未検出,,stat,,std,,12,0.602714,,0.602714,frame_00000.png,frame_00119.png,,,,,,6,hocho,R,R,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+hocho_R_8,QR未検出,,stat,,std,,4,0.748044,,0.748044,frame_00000.png,frame_00119.png,,,,,,7,hocho,R,R,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+hocho_R_12,QR未検出,,stat,,std,,12,0.855906,,0.855906,frame_00000.png,frame_00119.png,,,,,,8,hocho,R,R,12,,,frame_00000.png,frame_00119.png,,120,2.001357
+ex_R_4,QR未検出,,stat,,std,,12,0.615475,,0.615475,frame_00000.png,frame_00119.png,,,,,,9,ex,R,R,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+ex_R_8,QR未検出,,stat,,std,,4,0.816166,,0.816166,frame_00000.png,frame_00119.png,,,,,,10,ex,R,R,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+ex_R_12,QR未検出,,stat,,std,,12,0.870341,,0.870341,frame_00000.png,frame_00119.png,,,,,,11,ex,R,R,12,,,frame_00000.png,frame_00119.png,,120,2.001357
+rice_G_4,QR未検出,,stat,,std,,12,0.752422,,0.752422,frame_00000.png,frame_00119.png,,,,,,12,rice,G,G,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+rice_G_8,QR未検出,,stat,,std,,4,0.860616,,0.860616,frame_00000.png,frame_00119.png,,,,,,13,rice,G,G,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+rice_G_12,QR未検出,,stat,,std,,12,0.870724,,0.870724,frame_00000.png,frame_00119.png,,,,,,14,rice,G,G,12,,,frame_00000.png,frame_00119.png,,120,2.001357
+nagaoka_fireworks_G_4,QR未検出,,stat,,std,,12,0.737787,,0.737787,frame_00000.png,frame_00119.png,,,,,,15,nagaoka_fireworks,G,G,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+nagaoka_fireworks_G_8,QR未検出,,stat,,std,,4,0.842306,,0.842306,frame_00000.png,frame_00119.png,,,,,,16,nagaoka_fireworks,G,G,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+nagaoka_fireworks_G_12,QR未検出,,stat,,std,,12,0.855216,,0.855216,frame_00000.png,frame_00119.png,,,,,,17,nagaoka_fireworks,G,G,12,,,frame_00000.png,frame_00119.png,,120,2.001357
+hocho_G_4,QR未検出,,stat,,std,,12,0.702573,,0.702573,frame_00000.png,frame_00119.png,,,,,,18,hocho,G,G,4,,,frame_00000.png,frame_00119.png,,120,2.001357
+hocho_G_8,QR未検出,,stat,,std,,4,0.724367,,0.724367,frame_00000.png,frame_00119.png,,,,,,19,hocho,G,G,8,,,frame_00000.png,frame_00119.png,,120,2.001357
+hocho_G_12,QR未検出,,stat,,std,,12,0.782757,,0.782757,frame_00000.png,frame_00119.png,,,,,,20,hocho,G,G,12,,,frame_00000.png,frame_00119.png,,120,2.001357

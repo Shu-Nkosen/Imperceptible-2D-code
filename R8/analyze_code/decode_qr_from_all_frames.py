@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -23,14 +24,19 @@ DEFAULT_MEDIAN_KERNEL = 5
 DEFAULT_MEDIAN_ITERATIONS = 1
 _GT_CACHE: Dict[str, Tuple[Optional[np.ndarray], Optional[Tuple[slice, slice, Tuple[int, int, int, int]]]]] = {}
 FAST_VARIANT_ORDER = (
-    "median_gray",
+    "gray",
+)
+MID_VARIANT_ORDER = (
     "gray",
     "median_otsu",
+)
+FULL_VARIANT_ORDER = (
+    "gray",
+    "median_gray",
     "otsu",
+    "median_otsu",
     "otsu_close",
     "median_otsu_close",
-)
-FULL_VARIANT_ORDER = FAST_VARIANT_ORDER + (
     "otsu_inv",
     "median_otsu_inv",
     "adaptive",
@@ -38,6 +44,12 @@ FULL_VARIANT_ORDER = FAST_VARIANT_ORDER + (
 )
 FAST_SCALES = (1.0,)
 FULL_SCALES = (1.0, 2.0, 3.0)
+MID_MEDIAN_KERNELS = (3, 5, 7)
+
+# search mode: fast | mid | full
+# fast: gray × kernel=5 × 最精度デコード1回（detectAndDecodeMulti）
+# mid:  gray+median_otsu × kernels 3/5/7 × cascade+Multi
+# full: all variants + scales 1/2/3 × kernels 3/5/7 × cascade+Multi
 
 
 def parse_kernel_list(text: str) -> List[int]:
@@ -67,6 +79,7 @@ def sanitize_filename(value: str) -> str:
 
 
 def parse_diff_pair_indices(path: Path) -> Optional[Tuple[int, int]]:
+    """差分ファイル名の先頭・末尾フレーム番号を返す（pair は隣接、accum は窓端点）。"""
     match = re.match(r"(\d+)-(\d+)-", path.stem)
     if not match:
         return None
@@ -224,7 +237,7 @@ def empty_gt_metrics() -> Dict[str, str]:
     }
 
 
-def collect_all_diff_paths(folder_dir: Path) -> Tuple[List[Path], str]:
+def collect_all_diff_paths(folder_dir: Path, pair_each_end: int = 0) -> Tuple[List[Path], str]:
     diff_dir = folder_dir / DIFF_SUBDIR
     if not diff_dir.exists():
         return [], f"差分ディレクトリなし: {DIFF_SUBDIR}"
@@ -240,7 +253,24 @@ def collect_all_diff_paths(folder_dir: Path) -> Tuple[List[Path], str]:
         left, right = pair
         return (0, left, right, path.name)
 
-    return sorted(paths, key=sort_key), ""
+    paths = sorted(paths, key=sort_key)
+    total = len(paths)
+    if pair_each_end > 0 and total > pair_each_end * 2:
+        selected = paths[:pair_each_end] + paths[-pair_each_end:]
+        seen: set[str] = set()
+        limited: List[Path] = []
+        for path in selected:
+            key = str(path.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            limited.append(path)
+        paths = limited
+        print(
+            f"[INFO] {folder_dir.name}: pair limit first/last {pair_each_end} each "
+            f"-> {len(paths)}/{total} diffs"
+        )
+    return paths, ""
 
 
 def apply_median_filter(gray: np.ndarray, kernel_size: int, iterations: int) -> np.ndarray:
@@ -337,23 +367,76 @@ def iter_variant_targets(
             yield f"{variant_name}_x{scale:.1f}", target
 
 
-def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: bool) -> Optional[str]:
-    try:
-        ok, points = detector.detect(image)
-        if not ok or points is None:
-            if not allow_multi:
-                return None
-        else:
-            text, _ = detector.decode(image, points)
-            if text:
-                return text
-    except cv2.error:
-        if not allow_multi:
-            return None
+def trim_white_borders(gray: np.ndarray, white_min: int = 250) -> np.ndarray:
+    """matplotlib余白などが残っている差分画像の白縁を落とす。"""
+    if gray.ndim != 2 or gray.size == 0:
+        return gray
+    content = gray < white_min
+    if not np.any(content):
+        return gray
+    rows = np.any(content, axis=1)
+    cols = np.any(content, axis=0)
+    y0, y1 = int(np.argmax(rows)), int(len(rows) - np.argmax(rows[::-1]))
+    x0, x1 = int(np.argmax(cols)), int(len(cols) - np.argmax(cols[::-1]))
+    # わずかに余白を残す
+    pad = 8
+    y0 = max(0, y0 - pad)
+    x0 = max(0, x0 - pad)
+    y1 = min(gray.shape[0], y1 + pad)
+    x1 = min(gray.shape[1], x1 + pad)
+    if y1 - y0 < 16 or x1 - x0 < 16:
+        return gray
+    return gray[y0:y1, x0:x1]
 
-    if not allow_multi:
+
+def try_decode_zxing(image: np.ndarray) -> Optional[str]:
+    """ZXing (C++) — 欠損・低コントラストQRに強く、本パイプラインの主デコーダ。"""
+    try:
+        import zxingcpp
+    except ImportError:
         return None
 
+    if image is None or image.size == 0:
+        return None
+    if image.ndim == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+    if gray.dtype != np.uint8:
+        gray = np.clip(gray, 0, 255).astype(np.uint8)
+
+    formats = zxingcpp.BarcodeFormat.QRCode
+    attempts = (
+        {"formats": formats, "try_rotate": True, "try_downscale": True, "try_invert": True},
+        {
+            "formats": formats,
+            "try_rotate": True,
+            "try_downscale": True,
+            "try_invert": True,
+            "binarizer": zxingcpp.Binarizer.FixedThreshold,
+        },
+        {
+            "formats": formats,
+            "try_rotate": False,
+            "try_downscale": False,
+            "try_invert": True,
+            "is_pure": True,
+        },
+    )
+    for kwargs in attempts:
+        try:
+            results = zxingcpp.read_barcodes(gray, **kwargs)
+        except Exception:
+            continue
+        for barcode in results:
+            text = getattr(barcode, "text", None) or ""
+            if text:
+                return text
+    return None
+
+
+def try_decode_multi_once(detector: cv2.QRCodeDetector, image: np.ndarray) -> Optional[str]:
+    """OpenCV フォールバック（detectAndDecodeMulti）。"""
     try:
         retval, decoded_info, _, _ = detector.detectAndDecodeMulti(image)
         if retval and decoded_info:
@@ -362,38 +445,135 @@ def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: boo
                     return value
     except cv2.error:
         pass
+    return None
+
+
+def try_decode(detector: cv2.QRCodeDetector, image: np.ndarray, allow_multi: bool) -> Optional[str]:
+    """OpenCV QR 読取。スマホより弱いので detectAndDecode も常に試す。"""
+    candidates = [image]
+    trimmed = trim_white_borders(image)
+    if trimmed is not image and trimmed.shape != image.shape:
+        candidates.append(trimmed)
+
+    for target in candidates:
+        try:
+            text, points, _ = detector.detectAndDecode(target)
+            if text:
+                return text
+        except cv2.error:
+            pass
+
+        try:
+            ok, points = detector.detect(target)
+            if ok and points is not None:
+                text, _ = detector.decode(target, points)
+                if text:
+                    return text
+        except cv2.error:
+            pass
+
+        if allow_multi:
+            text = try_decode_multi_once(detector, target)
+            if text:
+                return text
 
     return None
+
+
+def resolve_search_mode(mid_search: bool, full_search: bool) -> str:
+    if full_search and mid_search:
+        print("[WARN] --full-search と --mid-search が両方指定されています。full-search を優先します。")
+    if full_search:
+        return "full"
+    if mid_search:
+        return "mid"
+    return "fast"
+
+
+def search_mode_params(mode: str) -> Tuple[Tuple[str, ...], Tuple[float, ...], str]:
+    """(variants, scales, decode_strategy)。strategy: best_once | cascade."""
+    if mode == "full":
+        return FULL_VARIANT_ORDER, FULL_SCALES, "cascade"
+    if mode == "mid":
+        return MID_VARIANT_ORDER, FAST_SCALES, "cascade"
+    return FAST_VARIANT_ORDER, FAST_SCALES, "best_once"
+
+
+def decode_qr_from_rgb_array(
+    rgb: np.ndarray,
+    median_kernel: int,
+    median_iterations: int,
+    search_mode: str,
+) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
+    if rgb is None or rgb.size == 0:
+        return None, "画像データなし", None
+    if rgb.ndim == 3 and rgb.shape[2] >= 3:
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    elif rgb.ndim == 2:
+        gray = rgb
+    else:
+        return None, "画像形式不正", None
+
+    median_gray = apply_median_filter(gray, median_kernel, median_iterations)
+    detector = cv2.QRCodeDetector()
+    last_target: Optional[np.ndarray] = None
+
+    variant_order, scales, decode_strategy = search_mode_params(search_mode)
+
+    for variant_tag, target in iter_variant_targets(gray, median_gray, variant_order, scales):
+        last_target = target
+        zx_text = try_decode_zxing(target)
+        if zx_text:
+            return (
+                zx_text,
+                f"zxing_{variant_tag}_k{median_kernel}_i{median_iterations}",
+                target,
+            )
+        if decode_strategy == "best_once":
+            text = try_decode_multi_once(detector, target)
+        else:
+            text = try_decode(detector, target, allow_multi=True)
+        if text:
+            return (
+                text,
+                f"opencv_{variant_tag}_k{median_kernel}_i{median_iterations}",
+                target,
+            )
+
+    return None, "decode失敗", last_target
 
 
 def decode_qr_from_diff(
     diff_path: Path,
     median_kernel: int,
     median_iterations: int,
-    full_search: bool,
+    search_mode: str,
 ) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
     gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
     if gray is None:
         return None, "画像読み込み失敗", None
+    rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    return decode_qr_from_rgb_array(rgb, median_kernel, median_iterations, search_mode)
 
-    median_gray = apply_median_filter(gray, median_kernel, median_iterations)
-    detector = cv2.QRCodeDetector()
+
+def decode_qr_with_kernel_candidates_from_array(
+    rgb: np.ndarray,
+    kernel_candidates: List[int],
+    median_iterations: int,
+    search_mode: str,
+) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
     last_target: Optional[np.ndarray] = None
-
-    variant_order = FULL_VARIANT_ORDER if full_search else FAST_VARIANT_ORDER
-    scales = FULL_SCALES if full_search else FAST_SCALES
-    allow_multi = full_search
-
-    for variant_tag, target in iter_variant_targets(gray, median_gray, variant_order, scales):
-        last_target = target
-        text = try_decode(detector, target, allow_multi=allow_multi)
+    for kernel in kernel_candidates:
+        text, method, used_img = decode_qr_from_rgb_array(
+            rgb,
+            kernel,
+            median_iterations,
+            search_mode,
+        )
+        if used_img is not None:
+            last_target = used_img
         if text:
-            return (
-                text,
-                f"{variant_tag}_k{median_kernel}_i{median_iterations}",
-                target,
-            )
-
+            return text, method, used_img
     return None, "decode失敗", last_target
 
 
@@ -401,7 +581,7 @@ def decode_qr_with_kernel_candidates(
     diff_path: Path,
     kernel_candidates: List[int],
     median_iterations: int,
-    full_search: bool,
+    search_mode: str,
 ) -> Tuple[Optional[str], str, Optional[np.ndarray]]:
     last_target: Optional[np.ndarray] = None
     for kernel in kernel_candidates:
@@ -409,7 +589,7 @@ def decode_qr_with_kernel_candidates(
             diff_path,
             kernel,
             median_iterations,
-            full_search,
+            search_mode,
         )
         if used_img is not None:
             last_target = used_img
@@ -448,18 +628,20 @@ def read_target_folders(base_dir: Path, input_csv: Path) -> List[Path]:
     )
 
 
-def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
-    diff_path = Path(str(task["diff_path"]))
+def process_array_task(task: Dict[str, object]) -> Dict[str, object]:
+    rgb = task["rgb"]
+    if not isinstance(rgb, np.ndarray):
+        rgb = np.asarray(rgb)
     kernel_candidates = [int(value) for value in task["kernel_candidates"]]
     median_iterations = int(task["median_iterations"])
-    full_search = bool(task["full_search"])
+    search_mode = str(task.get("search_mode") or "fast")
     gt_path_str = str(task.get("gt_path") or "")
 
-    decoded_text, method, used_img = decode_qr_with_kernel_candidates(
-        diff_path,
+    decoded_text, method, used_img = decode_qr_with_kernel_candidates_from_array(
+        rgb,
         kernel_candidates,
         median_iterations,
-        full_search,
+        search_mode,
     )
     ok = decoded_text is not None
 
@@ -469,7 +651,61 @@ def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
         if ok_encode:
             used_img_bytes = encoded.tobytes()
 
-    recall, precision, accuracy, noise, gt_note = compare_with_gt(used_img, gt_path_str)
+    if used_img is not None:
+        img_for_gt = used_img
+    elif rgb.ndim == 3:
+        img_for_gt = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    else:
+        img_for_gt = rgb
+    recall, precision, accuracy, noise, gt_note = compare_with_gt(img_for_gt, gt_path_str)
+
+    diff_stem = str(task.get("diff_stem") or "in_memory")
+    return {
+        "folder": str(task["folder"]),
+        "frame_1": str(task["frame_1"]),
+        "frame_2": str(task["frame_2"]),
+        "diff_image": str(task.get("diff_image") or ""),
+        "decoded_text": decoded_text or "",
+        "success": ok,
+        "method": method,
+        "note": "" if ok else "QR未検出",
+        "recall": recall,
+        "precision": precision,
+        "accuracy": accuracy,
+        "noise": noise,
+        "gt_note": gt_note,
+        "used_img_bytes": used_img_bytes,
+        "method_tag": sanitize_filename(method if method else "unknown"),
+        "diff_stem": diff_stem,
+        "task_key": str(task.get("task_key") or ""),
+    }
+
+
+def process_diff_task(task: Dict[str, object]) -> Dict[str, object]:
+    diff_path = Path(str(task["diff_path"]))
+    kernel_candidates = [int(value) for value in task["kernel_candidates"]]
+    median_iterations = int(task["median_iterations"])
+    search_mode = str(task.get("search_mode") or "fast")
+    gt_path_str = str(task.get("gt_path") or "")
+
+    gray = cv2.imread(str(diff_path), cv2.IMREAD_GRAYSCALE)
+
+    decoded_text, method, used_img = decode_qr_with_kernel_candidates(
+        diff_path,
+        kernel_candidates,
+        median_iterations,
+        search_mode,
+    )
+    ok = decoded_text is not None
+
+    used_img_bytes = None
+    if ok and used_img is not None:
+        ok_encode, encoded = cv2.imencode(".png", used_img)
+        if ok_encode:
+            used_img_bytes = encoded.tobytes()
+
+    img_for_gt = used_img if used_img is not None else gray
+    recall, precision, accuracy, noise, gt_note = compare_with_gt(img_for_gt, gt_path_str)
 
     return {
         "folder": str(task["folder"]),
@@ -496,13 +732,14 @@ def build_tasks(
     base_dir: Path,
     kernel_candidates: List[int],
     median_iterations: int,
-    full_search: bool,
+    search_mode: str,
+    pair_each_end: int = 0,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]]]:
     tasks: List[Dict[str, object]] = []
     pre_rows: List[Dict[str, object]] = []
 
     for folder_dir in target_folders:
-        diff_paths, note = collect_all_diff_paths(folder_dir)
+        diff_paths, note = collect_all_diff_paths(folder_dir, pair_each_end=pair_each_end)
         gt_path_str = ""
         gt_note = ""
         try:
@@ -559,7 +796,7 @@ def build_tasks(
                     "diff_image": str(diff_path.relative_to(base_dir)),
                     "kernel_candidates": kernel_candidates,
                     "median_iterations": median_iterations,
-                    "full_search": full_search,
+                    "search_mode": search_mode,
                     "gt_path": gt_path_str,
                 }
             )
@@ -625,15 +862,20 @@ def main() -> None:
         help="メディアンフィルタ反復回数（0で無効）",
     )
     parser.add_argument(
+        "--mid-search",
+        action="store_true",
+        help="gray+median_otsu × cascade+Multi × median kernels 3/5/7（拡大なし）",
+    )
+    parser.add_argument(
         "--full-search",
         action="store_true",
-        help="全バリアント×全スケール×Multi decodeで徹底探索（遅い）",
+        help="全バリアント×拡大(1/2/3)×median kernels 3/5/7×cascade+Multiで徹底探索（遅い）",
     )
     parser.add_argument(
         "--workers",
         type=int,
-        default=1,
-        help="並列ワーカー数（1で従来の逐次処理）",
+        default=16,
+        help="並列ワーカー数（既定: 16。実コア数を超えないよう自動上限。1で逐次処理）",
     )
     parser.add_argument(
         "--no-save-analysis",
@@ -646,22 +888,58 @@ def main() -> None:
         default="",
         help="対象ルートの絶対パス（未指定時は本スクリプト配置ディレクトリ）",
     )
+    parser.add_argument(
+        "--diff-subdir",
+        type=str,
+        default="",
+        help="差分サブディレクトリ名（未指定時: rgb_max_diff_maps）",
+    )
+    parser.add_argument(
+        "--pair-each-end",
+        type=int,
+        default=0,
+        help="pair 時: 先頭/末尾それぞれ N ペアだけデコード（0=全ペア）",
+    )
     args = parser.parse_args()
+
+    global DIFF_SUBDIR
+    if args.diff_subdir.strip():
+        DIFF_SUBDIR = args.diff_subdir.strip()
 
     median_kernel = max(1, args.median_kernel)
     if median_kernel % 2 == 0:
         median_kernel += 1
     median_iterations = max(0, args.median_iterations)
-    kernel_candidates = parse_kernel_list(args.median_kernels) if args.median_kernels else [median_kernel]
+    search_mode = resolve_search_mode(args.mid_search, args.full_search)
+    if args.median_kernels:
+        kernel_candidates = parse_kernel_list(args.median_kernels)
+    elif search_mode in ("mid", "full"):
+        kernel_candidates = list(MID_MEDIAN_KERNELS)
+    else:
+        kernel_candidates = [median_kernel]
     if not kernel_candidates:
         kernel_candidates = [median_kernel]
-    workers = max(1, args.workers)
+    requested_workers = max(1, args.workers)
+    cpu_count = os.cpu_count() or 1
+    workers = min(requested_workers, cpu_count)
+    if workers < requested_workers:
+        print(
+            f"[INFO] workers capped: requested={requested_workers} -> {workers} "
+            f"(cpu_count={cpu_count})"
+        )
     save_analysis = not args.no_save_analysis
 
-    mode = "full-search" if args.full_search else "fast"
+    try:
+        import zxingcpp  # noqa: F401
+
+        decode_backend = "zxing-cpp(+opencv fallback)"
+    except ImportError:
+        decode_backend = "opencv-only (pip install zxing-cpp 推奨)"
+
     print(
-        f"[INFO] mode: {mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
-        f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers}"
+        f"[INFO] mode: {search_mode} / folder filter: {args.folder or '(all)'} / limit: {args.limit} "
+        f"/ median kernels: {kernel_candidates}, iter={median_iterations}, workers={workers} "
+        f"/ diff_subdir={DIFF_SUBDIR} / decode={decode_backend}"
     )
 
     if args.base_dir:
@@ -692,7 +970,8 @@ def main() -> None:
         base_dir,
         kernel_candidates,
         median_iterations,
-        args.full_search,
+        search_mode,
+        pair_each_end=max(0, int(args.pair_each_end)),
     )
 
     total = len(tasks)
@@ -727,7 +1006,7 @@ def main() -> None:
                 elif done % 50 == 0 or done == total:
                     print(f"[INFO] progress: {done}/{total}")
 
-    with output_csv.open("w", encoding="utf-8", newline="") as f:
+    with output_csv.open("w", encoding="utf-8-sig", newline="") as f:
         fieldnames = [
             "folder",
             "frame_1",
