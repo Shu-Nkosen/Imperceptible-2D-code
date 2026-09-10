@@ -31,6 +31,7 @@ from OpenGL.GL import (
     GL_CLAMP_TO_EDGE,
     GL_COLOR_BUFFER_BIT,
     GL_LINEAR,
+    GL_NEAREST,
     GL_MODELVIEW,
     GL_ONE_MINUS_SRC_ALPHA,
     GL_PROJECTION,
@@ -331,16 +332,17 @@ def load_or_create_session(
 
 
 def load_texture_from_path(path: Path, size: tuple[int, int] | None = None) -> int:
+    """Load PNG as GL texture. Resize only when size is given and differs from image."""
     img = Image.open(path)
-    if size is not None:
-        img = img.resize(size, Image.LANCZOS)
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGB")
+    if size is not None and (img.width, img.height) != size:
+        img = img.resize(size, Image.NEAREST)
     data = np.array(img, dtype=np.uint8)
     tex = int(glGenTextures(1))
     glBindTexture(GL_TEXTURE_2D, tex)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
     if img.mode == "RGBA":
@@ -371,7 +373,7 @@ def load_texture_from_path(path: Path, size: tuple[int, int] | None = None) -> i
 
 
 def load_texture_from_rgba(arr: np.ndarray) -> int:
-    """arr: HxWx4 uint8."""
+    """arr: HxWx4 uint8. HUD only (LINEAR is fine for text)."""
     h, w = arr.shape[:2]
     tex = int(glGenTextures(1))
     glBindTexture(GL_TEXTURE_2D, tex)
@@ -409,6 +411,7 @@ def solid_texture(rgb: tuple[int, int, int], size: tuple[int, int] = (64, 64)) -
 
 
 def draw_fullscreen(tex: int) -> None:
+    glClear(GL_COLOR_BUFFER_BIT)
     glEnable(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, tex)
     glColor4f(1, 1, 1, 1)
@@ -428,7 +431,20 @@ def draw_fullscreen(tex: int) -> None:
 def draw_overlay(tex: int) -> None:
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-    draw_fullscreen(tex)
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glColor4f(1, 1, 1, 1)
+    glBegin(GL_QUADS)
+    glTexCoord2f(0, 1)
+    glVertex2f(-1, -1)
+    glTexCoord2f(1, 1)
+    glVertex2f(1, -1)
+    glTexCoord2f(1, 0)
+    glVertex2f(1, 1)
+    glTexCoord2f(0, 0)
+    glVertex2f(-1, 1)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
     glDisable(GL_BLEND)
 
 
@@ -438,6 +454,14 @@ def setup_ortho() -> None:
     glOrtho(-1, 1, -1, 1, -1, 1)
     glMatrixMode(GL_MODELVIEW)
     glLoadIdentity()
+
+
+def frames_for_seconds(sec: float, refresh_hz: float) -> int:
+    """Match present_session calc_frames with interval=1."""
+    if sec <= 0:
+        return 0
+    n = int(sec * float(refresh_hz) + 0.5)
+    return max(1, n)
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +490,6 @@ def make_hud(
     height: int,
     *,
     progress: str,
-    show_rating: bool,
     show_abort: bool,
     title: str = "",
     body_lines: Optional[list[str]] = None,
@@ -509,23 +532,6 @@ def make_hud(
             bx0, by0, bx1, by1 = width - 140, 16, width - 24, 56
             draw.rectangle((bx0, by0, bx1, by1), fill=(60, 60, 60, 220), outline=(200, 200, 200, 220))
             draw.text((bx0 + 28, by0 + 8), "中断", fill=(255, 255, 255, 240), font=font_md)
-
-    # rating strip at bottom
-    if show_rating:
-        strip_h = 160
-        draw.rectangle((0, height - strip_h, width, height), fill=(0, 0, 0, 180))
-        draw.text(
-            (40, height - strip_h + 16),
-            "ちらつきの強さ（1〜4 のキー）",
-            fill=(255, 255, 255, 255),
-            font=font_md,
-        )
-        x = 40
-        y = height - strip_h + 60
-        for n in range(1, 5):
-            label = f"{n}. {RATING_LABELS[n]}"
-            draw.text((x, y), label, fill=(255, 255, 200, 255), font=font_sm)
-            y += 28
 
     return np.array(img, dtype=np.uint8)
 
@@ -572,6 +578,7 @@ class ExperimentApp:
         self.session_path: Path = Path()
         self.csv_path: Path = Path()
         self.main_trials: list[Trial] = []
+        self._fps_logged = False
 
     # ---- GLFW callbacks ----
 
@@ -616,14 +623,12 @@ class ExperimentApp:
     def _ensure_pair(self, trial: Trial) -> tuple[int, int]:
         n_path = self.asset_dir / trial.normal_name
         i_path = self.asset_dir / trial.inv_name
+        # Resize only if asset resolution differs from the fullscreen window
+        size = (self.width, self.height)
         if trial.normal_name not in self.tex_cache:
-            self.tex_cache[trial.normal_name] = load_texture_from_path(
-                n_path, (self.width, self.height)
-            )
+            self.tex_cache[trial.normal_name] = load_texture_from_path(n_path, size)
         if trial.inv_name not in self.tex_cache:
-            self.tex_cache[trial.inv_name] = load_texture_from_path(
-                i_path, (self.width, self.height)
-            )
+            self.tex_cache[trial.inv_name] = load_texture_from_path(i_path, size)
         return self.tex_cache[trial.normal_name], self.tex_cache[trial.inv_name]
 
     def _set_hud(self, **kwargs) -> None:
@@ -644,15 +649,62 @@ class ExperimentApp:
         self.hud_tex = load_texture_from_rgba(arr)
         self.hud_key = key_t
 
-    def _frame(self, base_tex: int) -> None:
-        glClear(GL_COLOR_BUFFER_BIT)
-        draw_fullscreen(base_tex)
+    def _clear_hud(self) -> None:
         if self.hud_tex is not None:
+            glDeleteTextures([self.hud_tex])
+            self.hud_tex = None
+            self.hud_key = None
+
+    def _frame(self, base_tex: int, *, with_hud: bool = True) -> None:
+        """UI frames (start / rating / end). May blend HUD."""
+        draw_fullscreen(base_tex)
+        if with_hud and self.hud_tex is not None:
             draw_overlay(self.hud_tex)
         glfw.swap_buffers(self.window)
         glfw.poll_events()
         if self._check_abort_click():
             self.abort_requested = True
+
+    def _present_texture(self, tex: int) -> None:
+        """present_session-style: one texture, no HUD, one swap = one display frame."""
+        draw_fullscreen(tex)
+        glfw.swap_buffers(self.window)
+        glfw.poll_events()
+
+    def _present_frames(
+        self,
+        tex_or_pair: int | tuple[int, int],
+        n_frames: int,
+        *,
+        measure_fps: bool = False,
+    ) -> bool:
+        """Show tex for n_frames, or alternate (normal, inv) with f&1.
+
+        Returns False if aborted / window closed.
+        """
+        measure_n = min(60, n_frames) if measure_fps and not self._fps_logged else 0
+        t0 = time.perf_counter() if measure_n else 0.0
+        for f in range(n_frames):
+            if glfw.window_should_close(self.window) or self.abort_requested:
+                return False
+            if isinstance(tex_or_pair, tuple):
+                normal_tex, inv_tex = tex_or_pair
+                tex = inv_tex if (f & 1) else normal_tex
+            else:
+                tex = tex_or_pair
+            self._present_texture(tex)
+            if measure_n and f + 1 == measure_n:
+                elapsed = time.perf_counter() - t0
+                if elapsed > 0:
+                    hz = measure_n / elapsed
+                    print(f"[INFO] present ~{hz:.1f} Hz (target {TARGET_HZ})")
+                    if abs(hz - TARGET_HZ) > 3.0:
+                        print(
+                            f"[WARN] Measured present rate far from {TARGET_HZ} Hz. "
+                            "Check OS refresh / exclusive fullscreen / vsync."
+                        )
+                    self._fps_logged = True
+        return True
 
     # ---- lifecycle ----
 
@@ -672,9 +724,20 @@ class ExperimentApp:
                 f"Set OS refresh to {TARGET_HZ} Hz before running."
             )
 
+        # Match present_session.c: video-mode hints before exclusive fullscreen
+        glfw.window_hint(glfw.RED_BITS, int(mode.bits.red) if mode else 8)
+        glfw.window_hint(glfw.GREEN_BITS, int(mode.bits.green) if mode else 8)
+        glfw.window_hint(glfw.BLUE_BITS, int(mode.bits.blue) if mode else 8)
+        glfw.window_hint(glfw.REFRESH_RATE, int(self.monitor_hz))
+        glfw.window_hint(glfw.RESIZABLE, glfw.FALSE)
+
         if self.window_mode:
             self.window = glfw.create_window(
-                min(1280, self.width), min(720, self.height), "Visibility Experiment", None, None
+                min(1280, self.width),
+                min(720, self.height),
+                "Visibility Experiment",
+                None,
+                None,
             )
             self.width = min(1280, self.width)
             self.height = min(720, self.height)
@@ -691,12 +754,18 @@ class ExperimentApp:
         glfw.swap_interval(1)  # vsync; with 60 Hz monitor => ~60 fps
         glfw.set_key_callback(self.window, self._on_key)
         glfw.set_mouse_button_callback(self.window, self._on_mouse)
+        if not self.window_mode:
+            glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_NORMAL)
         glClearColor(0, 0, 0, 1)
         setup_ortho()
-        glEnable(GL_TEXTURE_2D)
 
         self.tex_gray = solid_texture(ISI_GRAY)
         self.tex_dark = solid_texture(BG_DARK)
+        print(
+            f"[INFO] present frames: ISI={frames_for_seconds(ISI_SEC, self.monitor_hz)} "
+            f"stim={frames_for_seconds(STIM_SEC, self.monitor_hz)} "
+            f"(@ {self.monitor_hz:.1f} Hz)"
+        )
 
     def shutdown(self) -> None:
         for tex in list(self.tex_cache.values()):
@@ -740,6 +809,13 @@ class ExperimentApp:
                 self.session["practice_done"] = True
                 save_session(self.session_path, self.session)
 
+            remaining = [t for t in self.main_trials if (False, t.trial_index) not in done]
+            if remaining:
+                resuming_main = any(not is_prac for is_prac, _ in done)
+                if not self._show_main_ready(resuming=resuming_main):
+                    self._abort_session()
+                    return
+
             for trial in self.main_trials:
                 if (False, trial.trial_index) in done:
                     continue
@@ -775,7 +851,8 @@ class ExperimentApp:
             "3. ちらつきが分かる",
             "4. はっきりちらつく",
             "",
-            "各試行は灰色 → 刺激5秒 → 回答（刺激は表示したまま）。",
+            "最初に練習が 1 回あり、そのあと本番（48試行）に入ります。",
+            "各試行は灰色 → 刺激5秒 → 画面が切り替わってから 1〜4 で回答。",
             "視聴距離は実験者の指示どおりに固定してください。",
             "右上「中断」または Esc で中断できます（途中まで保存されます）。",
         ]
@@ -786,11 +863,48 @@ class ExperimentApp:
         self.abort_requested = False
         self._set_hud(
             progress="",
-            show_rating=False,
             show_abort=True,
             title="ちらつき評定実験",
             body_lines=body,
             footer="Enter で開始",
+        )
+        while not glfw.window_should_close(self.window):
+            self._frame(self.tex_dark)
+            if self.abort_requested:
+                return False
+            if self.enter_pressed:
+                return True
+        return False
+
+    def _show_main_ready(self, resuming: bool) -> bool:
+        if resuming:
+            title = "本番の続き"
+            body = [
+                "練習は終わりです。ここからが本番です。",
+                "前回の続きから再開します。",
+                "",
+                "やり方は練習と同じです。",
+                "灰色 → 刺激5秒 → 画面が切り替わってから 1〜4 で回答。",
+            ]
+            footer = "Enter で再開"
+        else:
+            title = "本番を始めます"
+            body = [
+                "練習は終わりです。ここからが本番です（48試行）。",
+                "",
+                "やり方は練習と同じです。",
+                "灰色 → 刺激5秒 → 画面が切り替わってから 1〜4 で回答。",
+            ]
+            footer = "Enter で本番開始"
+        self.enter_pressed = False
+        self.abort_requested = False
+        self.rating_key = None
+        self._set_hud(
+            progress="",
+            show_abort=True,
+            title=title,
+            body_lines=body,
+            footer=footer,
         )
         while not glfw.window_should_close(self.window):
             self._frame(self.tex_dark)
@@ -805,7 +919,6 @@ class ExperimentApp:
         self.abort_requested = False
         self._set_hud(
             progress="完了",
-            show_rating=False,
             show_abort=False,
             title="ご協力ありがとうございました",
             body_lines=[
@@ -826,57 +939,57 @@ class ExperimentApp:
         self.abort_requested = False
         self.mouse_clicked = False
 
-        # --- ISI gray 1s ---
+        isi_frames = frames_for_seconds(ISI_SEC, self.monitor_hz)
+        stim_frames = frames_for_seconds(STIM_SEC, self.monitor_hz)
+
+        # --- ISI gray (frame-counted; progress HUD only, no flicker) ---
         self._set_hud(
             progress=progress,
-            show_rating=False,
             show_abort=True,
             title="",
             body_lines=None,
             footer="",
         )
         t_isi = time.perf_counter()
-        while time.perf_counter() - t_isi < ISI_SEC:
+        for _ in range(isi_frames):
             if glfw.window_should_close(self.window) or self.abort_requested:
                 return False
             self._frame(self.tex_gray)
 
-        # --- stimulus 5s (no rating yet) ---
-        self._set_hud(
-            progress=progress,
-            show_rating=False,
-            show_abort=True,
-            title="",
-            body_lines=None,
-            footer="",
-        )
+        # --- stimulus (frame-counted normal/inv, no HUD — present_session style) ---
+        self._clear_hud()
         t_stim = time.perf_counter()
-        flip = False
-        while time.perf_counter() - t_stim < STIM_SEC:
-            if glfw.window_should_close(self.window) or self.abort_requested:
-                return False
-            self.rating_key = None  # ignore early presses
-            tex = normal_tex if not flip else inv_tex
-            self._frame(tex)
-            flip = not flip
+        self.rating_key = None
+        if not self._present_frames(
+            (normal_tex, inv_tex),
+            stim_frames,
+            measure_fps=True,
+        ):
+            return False
 
-        # --- rating while stimulus continues ---
+        # --- rating: stop stimulus, text-only like the start screen ---
+        rating_body = [
+            "ちらつきの強さはどれでしたか。",
+            "1〜4 のキーで答えてください。",
+            "",
+            "1. 全く分からない",
+            "2. よく見ると、わずかにちらつく",
+            "3. ちらつきが分かる",
+            "4. はっきりちらつく",
+        ]
         self._set_hud(
             progress=progress,
-            show_rating=True,
             show_abort=True,
-            title="",
-            body_lines=None,
-            footer="",
+            title="ちらつきの強さ",
+            body_lines=rating_body,
+            footer="1〜4 のキーで回答",
         )
         self.rating_key = None
         t_rate_start = time.perf_counter()
         while True:
             if glfw.window_should_close(self.window) or self.abort_requested:
                 return False
-            tex = normal_tex if not flip else inv_tex
-            self._frame(tex)
-            flip = not flip
+            self._frame(self.tex_dark)
             if self.rating_key in (1, 2, 3, 4):
                 break
 
