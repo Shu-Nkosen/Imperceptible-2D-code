@@ -161,7 +161,7 @@ def main() -> None:
 
     width = 0.18
     for i, fam in enumerate(FAMS):
-        vals = [r[f"{fam}_pct"] for r in out_rows]
+        vals = [r[f"{fam}_ok"] for r in out_rows]
         axes[1].bar(
             x + (i - 1.5) * width,
             vals,
@@ -173,8 +173,10 @@ def main() -> None:
         )
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels)
-    axes[1].set_ylabel("復号成功率（%）")
+    axes[1].set_ylabel("復号可能条件（枚数）")
     axes[1].set_title("45/60/90 手法別（各 n=270）")
+    _, y_hi = (0, max(max(r[f"{fam}_ok"] for r in out_rows) for fam in FAMS) * 1.15 + 5)
+    axes[1].set_ylim(0, y_hi)
     axes[1].set_axisbelow(True)
     axes[1].grid(axis="y", alpha=0.3)
     axes[1].legend(fontsize=8, ncol=2, loc="upper right")

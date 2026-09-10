@@ -28,13 +28,22 @@ from family_labels import (
     LABEL_BINARY,
     LABEL_GRAY,
     LABEL_INTENSITY,
+    METRIC_ANY_SUCCESS_COUNT,
     METRIC_ANY_SUCCESS_PCT,
     accum_sweep_keep,
+    count_of,
     jp_channel,
     jp_channels,
     jp_family,
     jp_intensity,
     jp_rate_legend,
+    rate_of,
+)
+from count_chart import (
+    METRIC_YLABEL,
+    heatmap_cell_text,
+    title_scope,
+    title_scope_text,
 )
 
 PASS_TO_FAMILY = {
@@ -102,7 +111,7 @@ def format_hz_label(hz: float) -> str:
 
 
 def load_freq_rate_rows() -> list[dict]:
-    """表示レート×解析周波数ごとの 同期検波・時間FFT 復号成功率。"""
+    """表示レート×解析周波数ごとの 同期検波・時間FFT 復号可能条件数。"""
     stems = sorted(p for p in ROOT.iterdir() if p.is_dir() and p.name.startswith("r"))
     # (rate, fam, freq, stem, folder) -> any_ok
     ok: dict[tuple, int] = defaultdict(int)
@@ -136,15 +145,15 @@ def load_freq_rate_rows() -> list[dict]:
 
     rows: list[dict] = []
     for (rate, fam, hz), vals in sorted(buckets.items()):
+        success = sum(vals)
         rows.append(
             {
                 "rate_hz": rate,
                 "family": fam,
                 "target_hz": hz,
                 "n": len(vals),
-                "any_success_pct": rate_of(
-                    [{"any_ok": v} for v in vals], key="any_ok"
-                ),
+                "any_success_count": success,
+                "any_success_pct": rate_of([{"any_ok": v} for v in vals], key="any_ok"),
             }
         )
     return rows
@@ -155,10 +164,10 @@ def parse_stem(stem: str) -> tuple[int, int, int]:
     return int(parts[0][1:]), int(parts[1][1:]), int(parts[2][1:])
 
 
-def rate_of(rows: list[dict], key: str = "any_ok") -> float:
-    if not rows:
-        return float("nan")
-    return 100.0 * sum(r[key] for r in rows) / len(rows)
+def ylim_for_counts(values: list[float | int], *, floor: float = 5.0) -> tuple[float, float]:
+    finite = [float(v) for v in values if v == v]
+    ymax = max(finite) if finite else 1.0
+    return 0.0, max(floor, ymax * 1.15)
 
 
 def load_family_rows() -> dict[str, list[dict]]:
@@ -254,7 +263,9 @@ def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     family_rows = load_family_rows()
-
+    n_cond = len(family_rows["pair"])
+    n_intensity = n_cond // 3
+    n_image_channel_cell = n_intensity // 20  # 画像4×色5、強度固定
     # --- CSV: intensity × factor breakdown ---
     csv_rows: list[dict] = []
     for fam in FAMILIES:
@@ -268,6 +279,7 @@ def main() -> None:
                     "level": "-",
                     "intensity": inten,
                     "n": len(sub),
+                    "any_success_count": count_of(sub),
                     "any_success_pct": f"{rate_of(sub):.2f}",
                 }
             )
@@ -287,30 +299,36 @@ def main() -> None:
                             "level": str(level),
                             "intensity": inten,
                             "n": len(ss),
+                            "any_success_count": count_of(ss),
                             "any_success_pct": f"{rate_of(ss):.2f}",
                         }
                     )
     write_csv(
         OUT / "intensity_cross.csv",
         csv_rows,
-        ["family", "factor", "level", "intensity", "n", "any_success_pct"],
+        ["family", "factor", "level", "intensity", "n", "any_success_count", "any_success_pct"],
     )
 
     # --- 09: overall intensity × family ---
     fig, ax = plt.subplots(figsize=(9, 4.5))
     x = np.arange(len(INTENSITIES))
     width = 0.12
+    bar_groups_09: list[tuple] = []
+    all_09: list[float] = []
     for i, fam in enumerate(FAMILIES):
         ys = [
-            rate_of([r for r in family_rows[fam] if r["intensity"] == inten])
+            count_of([r for r in family_rows[fam] if r["intensity"] == inten])
             for inten in INTENSITIES
         ]
-        ax.bar(x + (i - 2.5) * width, ys, width, label=jp_family(fam), color=C[fam])
+        all_09.extend(ys)
+        bars = ax.bar(x + (i - 2.5) * width, ys, width, label=jp_family(fam), color=C[fam])
+        bar_groups_09.append((bars, ys))
     ax.set_xticks(x)
     ax.set_xticklabels([jp_intensity(t) for t in INTENSITIES])
-    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
-    ax.set_title("埋め込み強度 × 手法（全体）")
-    ax.set_ylim(0, 100)
+    ax.set_ylabel(METRIC_YLABEL)
+    ax.set_title(title_scope("色の変化強度 × 手法", n_intensity))
+    _, y_hi = ylim_for_counts(all_09)
+    ax.set_ylim(0, y_hi)
     ax.legend(ncol=3, fontsize=8)
     fig.savefig(OUT / "09_intensity_by_family.png")
     plt.close(fig)
@@ -318,10 +336,11 @@ def main() -> None:
     # --- 10: intensity × display rate ---
     rates = sorted({r["rate"] for r in family_rows["pair"]})
     fig, axes = plt.subplots(2, 3, figsize=(12, 7), sharey=True)
+    all_intensity_vals: list[float] = []
     for ax, fam in zip(axes.ravel(), FAMILIES):
         for rate in rates:
             ys = [
-                rate_of(
+                count_of(
                     [
                         r
                         for r in family_rows[fam]
@@ -330,13 +349,16 @@ def main() -> None:
                 )
                 for inten in INTENSITIES
             ]
+            all_intensity_vals.extend(ys)
             ax.plot(INTENSITIES, ys, marker="o", label=jp_rate_legend(rate))
         ax.set_title(jp_family(fam))
         ax.set_xlabel(LABEL_INTENSITY)
-        ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
-        ax.set_ylim(0, 100)
+        ax.set_ylabel(METRIC_YLABEL)
+    _, y_hi = ylim_for_counts(all_intensity_vals)
+    for ax in axes.ravel():
+        ax.set_ylim(0, y_hi)
     axes[0, 0].legend(fontsize=7, ncol=2)
-    fig.suptitle("埋め込み強度 × 表示レート（周波数）", y=1.01)
+    fig.suptitle(title_scope_text("色の変化強度 × 表示レート", f"各{n_intensity}条件中"), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "10_intensity_by_rate.png")
     plt.close(fig)
@@ -344,10 +366,11 @@ def main() -> None:
     # --- 11: intensity × exposure ---
     exps = sorted({r["exp"] for r in family_rows["pair"]})
     fig, axes = plt.subplots(2, 3, figsize=(12, 7), sharey=True)
+    all_exp_vals: list[float] = []
     for ax, fam in zip(axes.ravel(), FAMILIES):
         for exp in exps:
             ys = [
-                rate_of(
+                count_of(
                     [
                         r
                         for r in family_rows[fam]
@@ -356,23 +379,27 @@ def main() -> None:
                 )
                 for inten in INTENSITIES
             ]
+            all_exp_vals.extend(ys)
             ax.plot(INTENSITIES, ys, marker="o", label=f"1/{exp}")
         ax.set_title(jp_family(fam))
         ax.set_xlabel(LABEL_INTENSITY)
-        ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
-        ax.set_ylim(0, 100)
+        ax.set_ylabel(METRIC_YLABEL)
+    _, y_hi = ylim_for_counts(all_exp_vals)
+    for ax in axes.ravel():
+        ax.set_ylim(0, y_hi)
     axes[0, 0].legend(fontsize=8)
-    fig.suptitle("埋め込み強度 × 露光時間", y=1.01)
+    fig.suptitle(title_scope_text("色の変化強度 × 露光時間", f"各{n_intensity}条件中"), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "11_intensity_by_exposure.png")
     plt.close(fig)
 
     # --- 12: intensity × channel ---
     fig, axes = plt.subplots(2, 3, figsize=(12, 7), sharey=True)
+    all_ch_vals: list[float] = []
     for ax, fam in zip(axes.ravel(), FAMILIES):
         for ch in CHANNELS:
             ys = [
-                rate_of(
+                count_of(
                     [
                         r
                         for r in family_rows[fam]
@@ -381,13 +408,16 @@ def main() -> None:
                 )
                 for inten in INTENSITIES
             ]
+            all_ch_vals.extend(ys)
             ax.plot(INTENSITIES, ys, marker="o", label=jp_channel(ch))
         ax.set_title(jp_family(fam))
         ax.set_xlabel(LABEL_INTENSITY)
-        ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
-        ax.set_ylim(0, 100)
+        ax.set_ylabel(METRIC_YLABEL)
+    _, y_hi = ylim_for_counts(all_ch_vals)
+    for ax in axes.ravel():
+        ax.set_ylim(0, y_hi)
     axes[0, 0].legend(fontsize=8, ncol=2)
-    fig.suptitle("埋め込み強度 × チャネル", y=1.01)
+    fig.suptitle(title_scope_text("色の変化強度 × チャネル", f"各{n_intensity}条件中"), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "12_intensity_by_channel.png")
     plt.close(fig)
@@ -397,10 +427,11 @@ def main() -> None:
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharey=True)
     x = np.arange(len(INTENSITIES))
     width = 0.12
+    all_img_vals: list[float] = []
     for ax, img in zip(axes.ravel(), images):
         for i, fam in enumerate(FAMILIES):
             ys = [
-                rate_of(
+                count_of(
                     [
                         r
                         for r in family_rows[fam]
@@ -409,17 +440,20 @@ def main() -> None:
                 )
                 for inten in INTENSITIES
             ]
+            all_img_vals.extend(ys)
             ax.bar(x + (i - 2.5) * width, ys, width, label=jp_family(fam), color=C[fam])
         ax.set_xticks(x)
         ax.set_xticklabels([jp_intensity(t) for t in INTENSITIES])
-        ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
-        ax.set_ylim(0, 100)
+        ax.set_ylabel(METRIC_ANY_SUCCESS_COUNT)
         ax.set_title(jp_image(img), color=IMAGE_THEME[img], fontweight="bold")
         for spine in ax.spines.values():
             spine.set_edgecolor(IMAGE_THEME[img])
             spine.set_linewidth(2.0)
+    _, y_hi = ylim_for_counts(all_img_vals)
+    for ax in axes.ravel():
+        ax.set_ylim(0, y_hi)
     axes[0, 0].legend(ncol=3, fontsize=7)
-    fig.suptitle("埋め込み強度 × 手法（画像別）", y=1.01)
+    fig.suptitle("色の変化強度 × 手法（画像別）", y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "13_intensity_by_family.png")
     plt.close(fig)
@@ -441,7 +475,7 @@ def main() -> None:
                         and r["image"] == img
                         and r["channel"] == ch
                     ]
-                    row.append(rate_of(ss))
+                    row.append(float(count_of(ss)))
                 mat.append(row)
             mats.append(np.array(mat, dtype=float))
         all_mats[fam] = mats
@@ -477,16 +511,16 @@ def main() -> None:
                     ax.text(
                         j,
                         i,
-                        f"{v:.0f}",
+                        heatmap_cell_text(v),
                         ha="center",
                         va="center",
-                        fontsize=7,
+                        fontsize=6,
                         color="black" if v < vmax * 0.65 else "white",
                     )
             if ri == 0:
                 ax.set_title(jp_intensity(inten), fontsize=11)
-    fig.colorbar(last_im, ax=axes.ravel().tolist(), shrink=0.55, label=METRIC_ANY_SUCCESS_PCT)
-    fig.suptitle("画像×チャネル（強度別 復号成功率）", fontsize=13)
+    fig.colorbar(last_im, ax=axes.ravel().tolist(), shrink=0.55, label=METRIC_YLABEL)
+    fig.suptitle(title_scope_text("画像×チャネル（色の変化強度別）", f"各セル{n_image_channel_cell}条件中"), fontsize=13)
     fig.savefig(OUT / "14_intensity_heatmap.png")
     plt.close(fig)
     for old in OUT.glob("14_intensity_heatmap_*.png"):
@@ -503,11 +537,12 @@ def main() -> None:
                 "family_ja": jp_family(r["family"]),
                 "target_hz": r["target_hz"],
                 "n": r["n"],
+                "any_success_count": r["any_success_count"],
                 "any_success_pct": f"{r['any_success_pct']:.4f}",
             }
             for r in freq_rows
         ],
-        ["rate_hz", "family", "family_ja", "target_hz", "n", "any_success_pct"],
+        ["rate_hz", "family", "family_ja", "target_hz", "n", "any_success_count", "any_success_pct"],
     )
 
     fig, axes = plt.subplots(1, 3, figsize=(13.2, 5.0), sharey=True)
@@ -517,17 +552,23 @@ def main() -> None:
     for rate in FREQ_RATES:
         for r in freq_rows:
             if r["rate_hz"] == rate:
-                freq_ymax = max(freq_ymax, float(r["any_success_pct"]))
-    freq_ylim = (0, max(10.0, freq_ymax * 1.25))
+                freq_ymax = max(freq_ymax, float(r["any_success_count"]))
+    freq_ylim = ylim_for_counts([freq_ymax], floor=5.0)
     for ax, rate in zip(axes, FREQ_RATES):
         sub = [r for r in freq_rows if r["rate_hz"] == rate]
         freqs = sorted({r["target_hz"] for r in sub})
         x = np.arange(len(freqs))
         for i, fam in enumerate(FREQ_FAMS):
             ys = []
+            ns = []
             for hz in freqs:
                 hit = [r for r in sub if r["family"] == fam and r["target_hz"] == hz]
-                ys.append(hit[0]["any_success_pct"] if hit else float("nan"))
+                if hit:
+                    ys.append(hit[0]["any_success_count"])
+                    ns.append(hit[0]["n"])
+                else:
+                    ys.append(float("nan"))
+                    ns.append(0)
             bars = ax.bar(
                 x + (i - 0.5) * width,
                 ys,
@@ -536,28 +577,21 @@ def main() -> None:
                 color=C[fam],
                 edgecolor="white",
             )
-            for b, v in zip(bars, ys):
-                if v == v and v >= 1.0:  # 小さい値は省略して可読性優先
-                    ax.text(
-                        b.get_x() + b.get_width() / 2,
-                        v + freq_ylim[1] * 0.02,
-                        f"{v:.0f}",
-                        ha="center",
-                        va="bottom",
-                        fontsize=fs_val,
-                        fontweight="bold",
-                    )
         ax.set_xticks(x)
         ax.set_xticklabels([f"{format_hz_label(h)}" for h in freqs], fontsize=fs_tick)
-        ax.set_title(f"表示 {rate} Hz", fontsize=fs_title)
+        n_rate_panel = n_cond // 5
+        ax.set_title(title_scope(f"表示 {rate} Hz", n_rate_panel), fontsize=fs_title)
         ax.set_xlabel("狙う周波数 [Hz]", fontsize=fs_label)
         ax.set_ylim(freq_ylim)
         ax.tick_params(labelsize=fs_tick)
         ax.axhline(0, color="#888", lw=0.5)
-    axes[0].set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=fs_label)
+    axes[0].set_ylabel(METRIC_YLABEL, fontsize=fs_label)
     axes[0].legend(frameon=False, loc="upper left", fontsize=fs_leg)
     fig.suptitle(
-        f"{jp_family('lockin')}・{jp_family('fourier')}：狙う周波数別の復号成功率",
+        title_scope_text(
+            f"{jp_family('lockin')}・{jp_family('fourier')}：狙う周波数別",
+            f"全{n_cond}条件",
+        ),
         fontsize=16,
     )
     fig.tight_layout()

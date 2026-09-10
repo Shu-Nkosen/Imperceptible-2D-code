@@ -32,11 +32,21 @@ from family_labels import (
     LABEL_GRAY,
     LABEL_INTENSITY,
     METRIC_ANY_SUCCESS,
+    METRIC_ANY_SUCCESS_COUNT,
     METRIC_ANY_SUCCESS_PCT,
+    METRIC_DECODE_COUNT,
     TALK_FAMILIES,
     accum_sweep_keep,
+    count_of,
     jp_channels,
     jp_family,
+    rate_of,
+)
+from count_chart import (
+    METRIC_YLABEL,
+    heatmap_cell_text,
+    title_scope,
+    title_scope_text,
 )
 
 PASS_TO_FAMILY = {
@@ -94,11 +104,13 @@ def to_float(x: str | None) -> float | None:
         return None
 
 
-def rate_of(rows: list[dict], key: str = "any_ok") -> float:
-    return 100.0 * sum(r[key] for r in rows) / len(rows)
+def ylim_for_counts(values: list[float | int], *, floor: float = 10.0) -> tuple[float, float]:
+    finite = [float(v) for v in values if v == v]
+    ymax = max(finite) if finite else 1.0
+    return 0.0, max(floor, ymax * 1.15)
 
 
-def heatmap(ax, matrix, title, images, channels, vmax):
+def heatmap(ax, matrix, title, images, channels, vmax, *, n_per_cell: int | None = None):
     im = ax.imshow(matrix, cmap="YlOrRd", vmin=0, vmax=vmax, aspect="auto")
     ax.set_xticks(range(len(channels)))
     ax.set_xticklabels(jp_channels(channels))
@@ -108,17 +120,19 @@ def heatmap(ax, matrix, title, images, channels, vmax):
     for tick, name in zip(ax.get_yticklabels(), images):
         tick.set_color(IMAGE_THEME.get(name, "#000000"))
         tick.set_fontweight("bold")
+    fs = 8 if n_per_cell is not None else 10
     for i in range(len(images)):
         for j in range(len(channels)):
             v = matrix[i][j]
+            txt = heatmap_cell_text(v)
             ax.text(
                 j,
                 i,
-                f"{v:.0f}",
+                txt,
                 ha="center",
                 va="center",
                 color="white" if v > vmax * 0.55 else "black",
-                fontsize=10,
+                fontsize=fs,
             )
     ax.set_title(title)
     return im
@@ -331,16 +345,20 @@ def main() -> None:
                     }
                 )
 
-    fam_any = {fam: rate_of(family_rows[fam]) for fam in FAMILIES}
-    fam_ad = {fam: rate_of(family_rows[fam], "adopted_ok") for fam in FAMILIES}
+    fam_any = {fam: count_of(family_rows[fam]) for fam in FAMILIES}
+    fam_ad = {fam: count_of(family_rows[fam], "adopted_ok") for fam in FAMILIES}
+    fam_any_pct = {fam: rate_of(family_rows[fam]) for fam in FAMILIES}
+    fam_ad_pct = {fam: rate_of(family_rows[fam], "adopted_ok") for fam in FAMILIES}
     fam_acc = {
         fam: float(
             np.mean([r["acc"] for r in family_rows[fam] if r["acc"] is not None])
         )
         for fam in FAMILIES
     }
-    pass_any = {pn: rate_of(rows) for pn, rows in rows_by_pass.items()}
-    pass_ad = {pn: rate_of(rows, "adopted_ok") for pn, rows in rows_by_pass.items()}
+    pass_any = {pn: count_of(rows) for pn, rows in rows_by_pass.items()}
+    pass_ad = {pn: count_of(rows, "adopted_ok") for pn, rows in rows_by_pass.items()}
+    pass_any_pct = {pn: rate_of(rows) for pn, rows in rows_by_pass.items()}
+    pass_ad_pct = {pn: rate_of(rows, "adopted_ok") for pn, rows in rows_by_pass.items()}
 
     rates = sorted({r["rate"] for r in family_rows["pair"]})
     exps = sorted({r["exp"] for r in family_rows["pair"]})
@@ -350,34 +368,39 @@ def main() -> None:
     payload = {
         "source": "out_mid_fast_0805",
         "note": (
-            "復号成功率＝条件のうちスイープのいずれかで decode_success=1 の割合。"
+            "復号可能条件＝スイープのいずれかで decode_success=1 の条件数。"
+            "図は枚数、CSV は枚数と成功率（%）を併記。"
             "手法は二値化と濃淡の OR（積算は窓5のみ）。"
             "re_analyze_mid_fast により lockin/fourier スイープを追記済み。"
         ),
         "n_stems": len(stems),
         "n_conditions": 1800,
-        "family_any_success_pct": fam_any,
-        "family_adopted_decode_pct": fam_ad,
+        "family_any_success_count": fam_any,
+        "family_adopted_decode_count": fam_ad,
+        "family_any_success_pct": fam_any_pct,
+        "family_adopted_decode_pct": fam_ad_pct,
         "family_mean_adopted_pixel_acc": fam_acc,
-        "pass_any_success_pct": pass_any,
-        "pass_adopted_decode_pct": pass_ad,
+        "pass_any_success_count": pass_any,
+        "pass_adopted_decode_count": pass_ad,
+        "pass_any_success_pct": pass_any_pct,
+        "pass_adopted_decode_pct": pass_ad_pct,
         "family_any_by_rate": {
             fam: {
-                str(rate): rate_of([r for r in family_rows[fam] if r["rate"] == rate])
+                str(rate): count_of([r for r in family_rows[fam] if r["rate"] == rate])
                 for rate in rates
             }
             for fam in FAMILIES
         },
         "family_any_by_exp": {
             fam: {
-                str(exp): rate_of([r for r in family_rows[fam] if r["exp"] == exp])
+                str(exp): count_of([r for r in family_rows[fam] if r["exp"] == exp])
                 for exp in exps
             }
             for fam in FAMILIES
         },
         "family_any_by_fluoro": {
             fam: {
-                f"f{fl}": rate_of([r for r in family_rows[fam] if r["fluoro"] == fl])
+                f"f{fl}": count_of([r for r in family_rows[fam] if r["fluoro"] == fl])
                 for fl in (0, 1)
             }
             for fam in FAMILIES
@@ -388,7 +411,7 @@ def main() -> None:
     for fam, key in (("pair", "image_channel_any_pair"), ("accum", "image_channel_any_accum")):
         for img in images:
             payload[key][img] = {
-                ch: rate_of(
+                ch: count_of(
                     [
                         r
                         for r in family_rows[fam]
@@ -405,41 +428,71 @@ def main() -> None:
     with (OUT / "family_summary.csv").open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
         w.writerow(
-            ["family", "any_success_pct", "adopted_decode_pct", "mean_adopted_pixel_acc"]
+            [
+                "family",
+                "any_success_count",
+                "any_success_pct",
+                "adopted_decode_count",
+                "adopted_decode_pct",
+                "mean_adopted_pixel_acc",
+            ]
         )
         for fam in FAMILIES:
             w.writerow(
-                [fam, f"{fam_any[fam]:.4f}", f"{fam_ad[fam]:.4f}", f"{fam_acc[fam]:.6f}"]
+                [
+                    fam,
+                    fam_any[fam],
+                    f"{fam_any_pct[fam]:.4f}",
+                    fam_ad[fam],
+                    f"{fam_ad_pct[fam]:.4f}",
+                    f"{fam_acc[fam]:.6f}",
+                ]
             )
 
     with (OUT / "pass_summary.csv").open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["pass", "family", "any_success_pct", "adopted_decode_pct"])
+        w.writerow(
+            [
+                "pass",
+                "family",
+                "any_success_count",
+                "any_success_pct",
+                "adopted_decode_count",
+                "adopted_decode_pct",
+            ]
+        )
         for pn in PASS_TO_FAMILY:
             w.writerow(
-                [pn, PASS_TO_FAMILY[pn], f"{pass_any[pn]:.4f}", f"{pass_ad[pn]:.4f}"]
+                [
+                    pn,
+                    PASS_TO_FAMILY[pn],
+                    pass_any[pn],
+                    f"{pass_any_pct[pn]:.4f}",
+                    pass_ad[pn],
+                    f"{pass_ad_pct[pn]:.4f}",
+                ]
             )
 
     with (OUT / "family_by_rate.csv").open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["family", "rate_hz", "any_success_pct"])
+        w.writerow(["family", "rate_hz", "any_success_count"])
         for fam in FAMILIES:
             for rate in rates:
                 w.writerow(
                     [
                         fam,
                         rate,
-                        f"{payload['family_any_by_rate'][fam][str(rate)]:.4f}",
+                        payload["family_any_by_rate"][fam][str(rate)],
                     ]
                 )
 
     with (OUT / "family_by_exp.csv").open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["family", "exp", "any_success_pct"])
+        w.writerow(["family", "exp", "any_success_count"])
         for fam in FAMILIES:
             for exp in exps:
                 w.writerow(
-                    [fam, exp, f"{payload['family_any_by_exp'][fam][str(exp)]:.4f}"]
+                    [fam, exp, payload["family_any_by_exp"][fam][str(exp)]]
                 )
 
     for name, key in (
@@ -448,12 +501,18 @@ def main() -> None:
     ):
         with (OUT / name).open("w", encoding="utf-8-sig", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["image", "channel", "any_success_pct"])
+            w.writerow(["image", "channel", "any_success_count"])
             for img in images:
                 for ch in channels:
-                    w.writerow([img, ch, f"{payload[key][img][ch]:.4f}"])
+                    w.writerow([img, ch, payload[key][img][ch]])
 
     # figures
+    n_cond = int(payload["n_conditions"])
+    n_rate = n_cond // 5
+    n_exp = n_cond // 3
+    n_fluoro = n_cond // 2
+    n_image_channel = n_cond // (len(images) * len(channels))
+
     talk_any = {fam: fam_any[fam] for fam in TALK_FAMILIES}
     order = sorted(TALK_FAMILIES, key=lambda fam: talk_any[fam], reverse=True)
     fig, ax = plt.subplots(figsize=(10, 5.2))
@@ -462,16 +521,14 @@ def main() -> None:
     bars = ax.barh(ys, vals, color=[C[f] for f in order], edgecolor="white", height=0.7)
     ax.set_yticks(ys)
     ax.set_yticklabels([jp_family(f) for f in order], fontsize=12)
-    ax.set_xlabel(METRIC_ANY_SUCCESS_PCT, fontsize=12)
+    ax.set_xlabel(METRIC_YLABEL, fontsize=12)
     ax.set_title(
-        "手法別 QR 復号成功率\n（条件数 n=1800、5フレーム積算は窓5のみ）",
+        title_scope_text("手法別", f"全{n_cond}条件中・5フレーム積算は窓5のみ"),
         fontsize=13,
     )
-    ax.set_xlim(0, max(vals) * 1.25)
-    for b, v in zip(bars, vals):
-        ax.text(v + 0.2, b.get_y() + b.get_height() / 2, f"{v:.1f}%", va="center", fontsize=11)
+    _, x_hi = ylim_for_counts(vals, floor=20.0)
+    ax.set_xlim(0, x_hi)
     ax.invert_yaxis()
-    fig.savefig(OUT / "01_family_any_success.png")
     plt.close(fig)
 
     pairs = [
@@ -485,57 +542,60 @@ def main() -> None:
     w = 0.36
     bin_vals = [pass_any[b] for _, b, _ in pairs]
     num_vals = [pass_any[n] for _, _, n in pairs]
-    ax.bar(x - w / 2, bin_vals, w, label=LABEL_BINARY, color="#1f4e79")
-    ax.bar(x + w / 2, num_vals, w, label=LABEL_GRAY, color="#2a9d8f")
+    bars_b = ax.bar(x - w / 2, bin_vals, w, label=LABEL_BINARY, color="#1f4e79")
+    bars_n = ax.bar(x + w / 2, num_vals, w, label=LABEL_GRAY, color="#2a9d8f")
     ax.set_xticks(x)
     ax.set_xticklabels([jp_family(p[0]) for p in pairs], fontsize=11)
-    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT)
-    ax.set_title(
-        f"{LABEL_BINARY}と{LABEL_GRAY}の復号成功率の比較\n"
-        "（5フレーム積算は窓5のみ。時間FFTの二値化は旧 th/255 でほぼ無効）"
-    )
+    ax.set_ylabel(METRIC_YLABEL)
+    ax.set_title(title_scope_text(f"{LABEL_BINARY}と{LABEL_GRAY}", f"全{n_cond}条件中"))
     ax.legend(frameon=False)
-    for i, (bv, nv) in enumerate(zip(bin_vals, num_vals)):
-        ax.text(i - w / 2, bv + 0.2, f"{bv:.1f}", ha="center", fontsize=9)
-        ax.text(i + w / 2, nv + 0.2, f"{nv:.1f}", ha="center", fontsize=9)
-    fig.savefig(OUT / "02_binary_vs_num.png")
+    _, y_hi = ylim_for_counts(bin_vals + num_vals, floor=20.0)
+    ax.set_ylim(0, y_hi)
     plt.close(fig)
 
-    key_fams = ["accum", "lockin", "fourier", "pair"]
+    key_fams = list(TALK_FAMILIES)
     fig, ax = plt.subplots(figsize=(10.5, 5.4))
     x = np.arange(len(rates))
     w = 0.2
+    rate_bar_groups: list[tuple] = []
+    rate_vals: list[float] = []
     for i, fam in enumerate(key_fams):
         vals = [payload["family_any_by_rate"][fam][str(r)] for r in rates]
-        ax.bar(x + (i - 1.5) * w, vals, w, label=jp_family(fam), color=C[fam])
+        rate_vals.extend(vals)
+        bars = ax.bar(x + (i - 1.5) * w, vals, w, label=jp_family(fam), color=C[fam])
+        rate_bar_groups.append((bars, vals))
     ax.set_xticks(x)
     ax.set_xticklabels([str(r) for r in rates], fontsize=14)
-    ax.set_xlabel("表示の切替速さ [Hz]", fontsize=14)
-    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=14)
-    ax.set_title("表示速さ別 復号成功率", fontsize=16)
+    ax.set_xlabel("ディスプレイのリフレッシュレート [Hz]", fontsize=14)
+    ax.set_ylabel(METRIC_YLABEL, fontsize=14)
+    ax.set_title(title_scope("表示の切り替え速さ別", n_rate), fontsize=16)
     ax.legend(frameon=False, ncol=2, fontsize=12)
     ax.tick_params(labelsize=13)
+    _, y_hi = ylim_for_counts(rate_vals, floor=20.0)
+    ax.set_ylim(0, y_hi)
     fig.savefig(OUT / "03_by_rate.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 5))
     x = np.arange(len(exps))
+    exp_bar_groups: list[tuple] = []
     all_vals: list[float] = []
     for i, fam in enumerate(key_fams):
         vals = [payload["family_any_by_exp"][fam][str(e)] for e in exps]
         all_vals.extend(vals)
-        ax.bar(x + (i - 1.5) * w, vals, w, label=jp_family(fam), color=C[fam])
+        bars = ax.bar(x + (i - 1.5) * w, vals, w, label=jp_family(fam), color=C[fam])
+        exp_bar_groups.append((bars, vals))
     ax.set_xticks(x)
     ax.set_xticklabels([f"1/{e}" for e in exps], fontsize=14)
     ax.set_xlabel("露光", fontsize=14)
-    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=14)
-    ax.set_title("露光別 復号成功率", fontsize=16)
+    ax.set_ylabel(METRIC_YLABEL, fontsize=14)
+    ax.set_title(title_scope("露光別", n_exp), fontsize=16)
     finite = [v for v in all_vals if np.isfinite(v)]
-    ymax = max(finite) if finite else 1.0
-    ax.set_ylim(0, max(ymax * 1.45, ymax + 8.0))
+    _, y_hi = ylim_for_counts(finite, floor=20.0)
+    ax.set_ylim(0, y_hi)
     ax.legend(frameon=False, ncol=2, fontsize=12, loc="upper right")
     ax.tick_params(labelsize=13)
-    fig.savefig(OUT / "04_by_exposure.png")
+    fig.savefig(OUT / "01_by_exposure.png")
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -543,17 +603,17 @@ def main() -> None:
     w = 0.36
     f0 = [payload["family_any_by_fluoro"][f]["f0"] for f in TALK_FAMILIES]
     f1 = [payload["family_any_by_fluoro"][f]["f1"] for f in TALK_FAMILIES]
-    ax.bar(x - w / 2, f0, w, label=LABEL_FLUORO_OFF, color="#8d99ae")
-    ax.bar(x + w / 2, f1, w, label=LABEL_FLUORO_ON, color="#ef233c")
+    bars_f0 = ax.bar(x - w / 2, f0, w, label=LABEL_FLUORO_OFF, color="#8d99ae")
+    bars_f1 = ax.bar(x + w / 2, f1, w, label=LABEL_FLUORO_ON, color="#ef233c")
     ax.set_xticks(x)
     ax.set_xticklabels([jp_family(f) for f in TALK_FAMILIES], rotation=15, fontsize=13)
-    ax.set_ylabel(METRIC_ANY_SUCCESS_PCT, fontsize=14)
-    ax.set_title("蛍光灯の有無別 復号成功率", fontsize=16)
-    fluoro_max = max(max(f0), max(f1)) if f0 and f1 else 1.0
-    ax.set_ylim(0, max(fluoro_max * 1.35, fluoro_max + 4.0))
+    ax.set_ylabel(METRIC_YLABEL, fontsize=14)
+    ax.set_title(title_scope("蛍光灯の有無別", n_fluoro), fontsize=16)
+    _, y_hi = ylim_for_counts(f0 + f1, floor=20.0)
+    ax.set_ylim(0, y_hi)
     ax.legend(frameon=False, fontsize=12, loc="upper right")
     ax.tick_params(labelsize=13)
-    fig.savefig(OUT / "05_by_fluoro.png")
+    fig.savefig(OUT / "02_by_fluoro.png")
     plt.close(fig)
 
     mat_pair = [
@@ -565,13 +625,26 @@ def main() -> None:
     ]
     vmax = max(max(max(r) for r in mat_pair), max(max(r) for r in mat_acc))
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8))
-    heatmap(axes[0], mat_pair, f"{jp_family('pair')} の復号成功率（%）", images, channels, vmax)
-    im1 = heatmap(
-        axes[1], mat_acc, f"{jp_family('accum')} の復号成功率（%）", images, channels, vmax
+    heatmap(
+        axes[0],
+        mat_pair,
+        title_scope(jp_family("pair"), n_image_channel),
+        images,
+        channels,
+        vmax,
+        n_per_cell=n_image_channel,
     )
-    fig.colorbar(im1, ax=axes.ravel().tolist(), shrink=0.85, label=METRIC_ANY_SUCCESS_PCT)
-    fig.suptitle("画像×チャネル別 復号成功率", fontsize=13, y=1.02)
-    fig.savefig(OUT / "06_image_channel_heatmap.png")
+    im1 = heatmap(
+        axes[1],
+        mat_acc,
+        title_scope(jp_family("accum"), n_image_channel),
+        images,
+        channels,
+        vmax,
+        n_per_cell=n_image_channel,
+    )
+    fig.colorbar(im1, ax=axes.ravel().tolist(), shrink=0.85, label=METRIC_YLABEL)
+    fig.suptitle(title_scope_text("画像×チャネル別", f"全{n_cond}条件"), fontsize=13, y=1.02)
     plt.close(fig)
 
     fig = plt.figure(figsize=(12, 7))
@@ -589,7 +662,7 @@ def main() -> None:
             for e in exps
         ),
     )
-    pct_ylim = (0, max(10.0, pct_max * 1.15))
+    pct_ylim = ylim_for_counts([pct_max], floor=20.0)
 
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.barh(
@@ -600,9 +673,9 @@ def main() -> None:
     ax1.set_yticks(range(len(order)))
     ax1.set_yticklabels([jp_family(f) for f in order])
     ax1.invert_yaxis()
-    ax1.set_xlabel(METRIC_ANY_SUCCESS_PCT)
+    ax1.set_xlabel(METRIC_ANY_SUCCESS_COUNT)
     ax1.set_xlim(pct_ylim)
-    ax1.set_title("手法別 復号成功率")
+    ax1.set_title("手法別 復号可能条件")
 
     ax2 = fig.add_subplot(gs[0, 1])
     for fam in key_fams:
@@ -614,7 +687,7 @@ def main() -> None:
             color=C[fam],
         )
     ax2.set_xlabel("レート [Hz]")
-    ax2.set_ylabel(METRIC_ANY_SUCCESS_PCT)
+    ax2.set_ylabel(METRIC_ANY_SUCCESS_COUNT)
     ax2.set_ylim(pct_ylim)
     ax2.set_title("レート別")
     ax2.legend(frameon=False, fontsize=8)
@@ -633,21 +706,18 @@ def main() -> None:
     ax3.set_xticks(x)
     ax3.set_xticklabels([f"1/{e}" for e in exps])
     ax3.set_ylim(pct_ylim)
-    ax3.set_ylabel(METRIC_ANY_SUCCESS_PCT)
+    ax3.set_ylabel(METRIC_ANY_SUCCESS_COUNT)
     ax3.set_title("露光別")
     ax3.legend(frameon=False, fontsize=8, ncol=2)
 
     ax4 = fig.add_subplot(gs[1, 1])
-    im = heatmap(ax4, mat_acc, f"{jp_family('accum')}：画像×チャネル（%）", images, channels, vmax)
+    im = heatmap(ax4, mat_acc, f"{jp_family('accum')}：画像×チャネル", images, channels, vmax)
     fig.colorbar(im, ax=ax4, fraction=0.046, pad=0.04)
     fig.suptitle(
-        "実験概要（復号成功率）／n=1800／5フレーム積算は窓5",
+        "実験概要（復号可能条件）／全1800条件／5フレーム積算は窓5",
         fontsize=14,
     )
-    fig.savefig(OUT / "00_overview.png")
     plt.close(fig)
-
-    plot_color_distribution(OUT)
 
     # also write Japanese name map into metrics
     payload["image_labels_ja"] = IMAGE_JP
@@ -655,6 +725,7 @@ def main() -> None:
     payload["family_labels_ja"] = FAMILY_JP
     payload["metric_labels_ja"] = {
         "any_success": METRIC_ANY_SUCCESS,
+        "any_success_count": METRIC_ANY_SUCCESS_COUNT,
         "any_success_pct": METRIC_ANY_SUCCESS_PCT,
         "binary": LABEL_BINARY,
         "gray": LABEL_GRAY,
@@ -678,8 +749,10 @@ def main() -> None:
         "only_accum": only_accum,
         "only_pair": only_pair,
         "both": both,
-        "pair_pct": fam_any["pair"],
-        "accum_pct": fam_any["accum"],
+        "pair_count": fam_any["pair"],
+        "accum_count": fam_any["accum"],
+        "pair_pct": fam_any_pct["pair"],
+        "accum_pct": fam_any_pct["accum"],
     }
     (OUT / "metrics.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -702,7 +775,8 @@ def main() -> None:
 - rice → **自然**（緑）
 
 ## 指標
-- **復号成功率**: 条件のうち、スイープのどれかでデコード成功した割合
+- **復号可能条件（枚数）**: スイープのどれかでデコード成功した条件数（図の縦軸・横軸）
+- **復号成功率（%）**: 上記の割合（CSV に併記）
 - **手法**: 二値化と濃淡の OR（積算は窓5のみ）
 - **採用スイープ**: 画素一致率が最大のスイープでの成功
 
@@ -710,16 +784,18 @@ def main() -> None:
 `re_analyze_mid_fast` により同期検波・時間FFTの不足スイープを追記済み。
 時間FFTの二値化に旧 th/255 行が残る場合あり（手法は二値化+濃淡の OR）。
 
-## ファイル
-- `00_overview.png` … 一枚もの
-- `01_family_any_success.png`
-- `02_binary_vs_num.png`
-- `03_by_rate.png`
-- `04_by_exposure.png`
-- `05_by_fluoro.png`
-- `06_image_channel_heatmap.png`
-- `07_image_color_strength.png` … テクスチャ（模様の細かさ／QR黒領域の明暗変化の平均）
-- `08_image_rgb_histograms.png` … 元画像 RGB ヒストグラム
+## ファイル（通し番号）
+- `01_by_exposure.png` … 露光別（本編①）
+- `02_by_fluoro.png` … 蛍光灯の有無別（本編①）
+- `03_by_rate.png` … 表示速さ別（本編②）
+- `04_intensity_by_family.png` … 強度×手法・45/60/90 Hz（本編③）
+- `05_rice_rgb_i12.png` … 自然・強度12の R/G/B（本編④）
+- `06_rice_channel_maps.png` … 自然のチャネルマップ（本編⑤）
+- `07_image_floor_vs_success.png` … 画素値と成功率（本編⑥）
+- `08_qr_black_rgb_means.png` … QR黒の RGB 平均
+- `09_b_embed_i12.png` … B埋め込み・強度12
+- `10_success_count_by_image_channel.png` … 画像×チャネルの成功数
+- `11_qr_black_rgb_hists.png` … QR黒 RGB ヒストグラム（縦軸 3万で揃え）
 - `metrics.json` / `*.csv`
 """
     (OUT / "README.md").write_text(readme, encoding="utf-8")

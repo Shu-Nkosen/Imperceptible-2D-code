@@ -117,7 +117,7 @@ def main() -> None:
         for r in out_rows:
             ax.scatter(
                 r[xkey],
-                r["lockin_pct"],
+                r["lockin_ok"],
                 s=90,
                 c=CH_COLOR[r["channel"]],
                 marker=MARK[r["image"]],
@@ -144,8 +144,8 @@ def main() -> None:
                     color=CH_COLOR["B"],
                 )
         ax.set_xlabel(xlabel)
-        ax.set_title("同期検波 成功率（45/60/90、各 n=54）")
-    axes[0].set_ylabel("同期検波 成功率（%）")
+        ax.set_title("同期検波 復号可能条件（45/60/90、各 n=54）")
+    axes[0].set_ylabel("同期検波 復号可能条件（枚数）")
     from matplotlib.lines import Line2D
 
     ch_h = [Line2D([0], [0], marker="o", color="w", markerfacecolor=CH_COLOR[c], markersize=8, label=c) for c in "RGB"]
