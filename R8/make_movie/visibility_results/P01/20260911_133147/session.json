@@ -1,0 +1,306 @@
+{
+  "participant_id": "P01",
+  "seed": 1627190069,
+  "monitor_hz": 60.0,
+  "target_hz": 60,
+  "stim_sec": 3.0,
+  "started_at": "2026-09-11T04:31:47.166463+00:00",
+  "practice_done": true,
+  "aborted": false,
+  "completed": true,
+  "trial_order": [
+    {
+      "trial_index": 1,
+      "image": "nagaoka_fireworks",
+      "channel": "B",
+      "intensity": 8
+    },
+    {
+      "trial_index": 2,
+      "image": "hocho",
+      "channel": "B",
+      "intensity": 8
+    },
+    {
+      "trial_index": 3,
+      "image": "ex",
+      "channel": "B",
+      "intensity": 8
+    },
+    {
+      "trial_index": 4,
+      "image": "nagaoka_fireworks",
+      "channel": "G",
+      "intensity": 16
+    },
+    {
+      "trial_index": 5,
+      "image": "ex",
+      "channel": "G",
+      "intensity": 4
+    },
+    {
+      "trial_index": 6,
+      "image": "ex",
+      "channel": "G",
+      "intensity": 12
+    },
+    {
+      "trial_index": 7,
+      "image": "rice",
+      "channel": "G",
+      "intensity": 16
+    },
+    {
+      "trial_index": 8,
+      "image": "rice",
+      "channel": "B",
+      "intensity": 12
+    },
+    {
+      "trial_index": 9,
+      "image": "nagaoka_fireworks",
+      "channel": "R",
+      "intensity": 12
+    },
+    {
+      "trial_index": 10,
+      "image": "ex",
+      "channel": "G",
+      "intensity": 16
+    },
+    {
+      "trial_index": 11,
+      "image": "nagaoka_fireworks",
+      "channel": "B",
+      "intensity": 16
+    },
+    {
+      "trial_index": 12,
+      "image": "rice",
+      "channel": "R",
+      "intensity": 8
+    },
+    {
+      "trial_index": 13,
+      "image": "ex",
+      "channel": "R",
+      "intensity": 12
+    },
+    {
+      "trial_index": 14,
+      "image": "hocho",
+      "channel": "R",
+      "intensity": 16
+    },
+    {
+      "trial_index": 15,
+      "image": "nagaoka_fireworks",
+      "channel": "B",
+      "intensity": 4
+    },
+    {
+      "trial_index": 16,
+      "image": "hocho",
+      "channel": "R",
+      "intensity": 12
+    },
+    {
+      "trial_index": 17,
+      "image": "nagaoka_fireworks",
+      "channel": "G",
+      "intensity": 8
+    },
+    {
+      "trial_index": 18,
+      "image": "rice",
+      "channel": "B",
+      "intensity": 16
+    },
+    {
+      "trial_index": 19,
+      "image": "nagaoka_fireworks",
+      "channel": "G",
+      "intensity": 12
+    },
+    {
+      "trial_index": 20,
+      "image": "ex",
+      "channel": "R",
+      "intensity": 4
+    },
+    {
+      "trial_index": 21,
+      "image": "hocho",
+      "channel": "G",
+      "intensity": 16
+    },
+    {
+      "trial_index": 22,
+      "image": "rice",
+      "channel": "B",
+      "intensity": 8
+    },
+    {
+      "trial_index": 23,
+      "image": "rice",
+      "channel": "B",
+      "intensity": 4
+    },
+    {
+      "trial_index": 24,
+      "image": "ex",
+      "channel": "B",
+      "intensity": 16
+    },
+    {
+      "trial_index": 25,
+      "image": "ex",
+      "channel": "R",
+      "intensity": 16
+    },
+    {
+      "trial_index": 26,
+      "image": "hocho",
+      "channel": "B",
+      "intensity": 12
+    },
+    {
+      "trial_index": 27,
+      "image": "rice",
+      "channel": "R",
+      "intensity": 4
+    },
+    {
+      "trial_index": 28,
+      "image": "rice",
+      "channel": "G",
+      "intensity": 8
+    },
+    {
+      "trial_index": 29,
+      "image": "nagaoka_fireworks",
+      "channel": "B",
+      "intensity": 12
+    },
+    {
+      "trial_index": 30,
+      "image": "hocho",
+      "channel": "G",
+      "intensity": 12
+    },
+    {
+      "trial_index": 31,
+      "image": "hocho",
+      "channel": "G",
+      "intensity": 4
+    },
+    {
+      "trial_index": 32,
+      "image": "nagaoka_fireworks",
+      "channel": "R",
+      "intensity": 8
+    },
+    {
+      "trial_index": 33,
+      "image": "nagaoka_fireworks",
+      "channel": "G",
+      "intensity": 4
+    },
+    {
+      "trial_index": 34,
+      "image": "ex",
+      "channel": "B",
+      "intensity": 4
+    },
+    {
+      "trial_index": 35,
+      "image": "ex",
+      "channel": "B",
+      "intensity": 12
+    },
+    {
+      "trial_index": 36,
+      "image": "rice",
+      "channel": "G",
+      "intensity": 12
+    },
+    {
+      "trial_index": 37,
+      "image": "hocho",
+      "channel": "R",
+      "intensity": 4
+    },
+    {
+      "trial_index": 38,
+      "image": "ex",
+      "channel": "R",
+      "intensity": 8
+    },
+    {
+      "trial_index": 39,
+      "image": "hocho",
+      "channel": "G",
+      "intensity": 8
+    },
+    {
+      "trial_index": 40,
+      "image": "rice",
+      "channel": "R",
+      "intensity": 12
+    },
+    {
+      "trial_index": 41,
+      "image": "ex",
+      "channel": "G",
+      "intensity": 8
+    },
+    {
+      "trial_index": 42,
+      "image": "nagaoka_fireworks",
+      "channel": "R",
+      "intensity": 4
+    },
+    {
+      "trial_index": 43,
+      "image": "nagaoka_fireworks",
+      "channel": "R",
+      "intensity": 16
+    },
+    {
+      "trial_index": 44,
+      "image": "rice",
+      "channel": "G",
+      "intensity": 4
+    },
+    {
+      "trial_index": 45,
+      "image": "rice",
+      "channel": "R",
+      "intensity": 16
+    },
+    {
+      "trial_index": 46,
+      "image": "hocho",
+      "channel": "B",
+      "intensity": 4
+    },
+    {
+      "trial_index": 47,
+      "image": "hocho",
+      "channel": "R",
+      "intensity": 8
+    },
+    {
+      "trial_index": 48,
+      "image": "hocho",
+      "channel": "B",
+      "intensity": 16
+    }
+  ],
+  "swap_interval": 1,
+  "hold_frames": 1,
+  "flicker_hz": 30.0,
+  "present_hz": 60.0,
+  "finished_at": "2026-09-11T04:37:02.078965+00:00"
+}
