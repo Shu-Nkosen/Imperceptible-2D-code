@@ -5,6 +5,8 @@ Uses existing normal/inv embedded PNGs from gen_assets.py.
 Practice: 1 trial. Main: 4 images x RGB x intensities 4/8/12/16 = 48 trials.
 
 Usage:
+  python visibility_experiment.py
+  python visibility_experiment.py --name 山田
   python visibility_experiment.py --id P01
   python gen_assets.py --images rice,nagaoka_fireworks,hocho,ex \\
       --intensities 4,8,12,16 --channels R,G,B --clip-margin 16
@@ -17,6 +19,7 @@ import csv
 import ctypes
 import json
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -127,6 +130,7 @@ RATING_LABELS = {
 
 CSV_FIELDS = [
     "participant_id",
+    "participant_name",
     "trial_index",
     "is_practice",
     "image",
@@ -260,6 +264,150 @@ def session_dir(participant_id: str) -> Path:
     return RESULTS_ROOT / safe
 
 
+PARTICIPANTS_PATH = RESULTS_ROOT / "participants.json"
+
+
+def _norm_name(name: str) -> str:
+    return " ".join(name.strip().split())
+
+
+def load_roster() -> list[dict]:
+    people: list[dict] = []
+    if PARTICIPANTS_PATH.exists():
+        try:
+            raw = json.loads(PARTICIPANTS_PATH.read_text(encoding="utf-8"))
+            people = list(raw.get("participants", raw if isinstance(raw, list) else []))
+        except (OSError, json.JSONDecodeError):
+            people = []
+    known = {str(p.get("id", "")) for p in people}
+    if RESULTS_ROOT.exists():
+        for d in sorted(RESULTS_ROOT.iterdir()):
+            if not d.is_dir():
+                continue
+            if d.name in known:
+                continue
+            people.append(
+                {
+                    "id": d.name,
+                    "name": "",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            known.add(d.name)
+    return people
+
+
+def save_roster(people: list[dict]) -> None:
+    RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
+    payload = {"participants": people}
+    tmp = PARTICIPANTS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(PARTICIPANTS_PATH)
+
+
+def next_participant_id(people: list[dict]) -> str:
+    n = 0
+    for p in people:
+        m = re.fullmatch(r"P(\d+)", str(p.get("id", "")), flags=re.IGNORECASE)
+        if m:
+            n = max(n, int(m.group(1)))
+    return f"P{n + 1:02d}"
+
+
+def print_roster(people: list[dict]) -> None:
+    print("登録済みの観察者:")
+    if not people:
+        print("  （まだいません）")
+        return
+    for p in people:
+        label = p.get("name") or "（名前未登録）"
+        print(f"  {p.get('id', '?')}  {label}")
+
+
+def resolve_participant(name: str, id_hint: str) -> tuple[str, str]:
+    """Return (id, name). Registers a new person when needed."""
+    people = load_roster()
+    name = _norm_name(name)
+    id_hint = id_hint.strip()
+
+    by_id = {str(p.get("id", "")).lower(): p for p in people if p.get("id")}
+    by_name = {
+        _norm_name(str(p.get("name", ""))).lower(): p
+        for p in people
+        if _norm_name(str(p.get("name", "")))
+    }
+
+    if name and name.lower() in by_name:
+        found = by_name[name.lower()]
+        found_id = str(found["id"])
+        if id_hint and found_id.lower() != id_hint.lower():
+            raise SystemExit(f"名前「{name}」は既に {found_id} です（指定ID: {id_hint}）")
+        return found_id, str(found.get("name") or name)
+
+    if id_hint and id_hint.lower() in by_id:
+        found = by_id[id_hint.lower()]
+        found_id = str(found["id"])
+        existing_name = _norm_name(str(found.get("name", "")))
+        if name and existing_name and existing_name.lower() != name.lower():
+            raise SystemExit(
+                f"ID {found_id} は既に「{existing_name}」です（指定名: {name}）"
+            )
+        if name and not existing_name:
+            found["name"] = name
+            save_roster(people)
+            return found_id, name
+        return found_id, existing_name or name
+
+    if not name:
+        raise SystemExit("観察者の名前が必要です")
+
+    new_id = id_hint if id_hint else next_participant_id(people)
+    if new_id.lower() in by_id:
+        raise SystemExit(f"ID {new_id} は既に使われています")
+    people.append(
+        {
+            "id": new_id,
+            "name": name,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    save_roster(people)
+    print(f"[INFO] 新規登録: {name} ({new_id})")
+    return new_id, name
+
+
+def prompt_identity(args: argparse.Namespace) -> tuple[str, str]:
+    people = load_roster()
+    name = _norm_name(getattr(args, "name", "") or "")
+    pid = (getattr(args, "id", "") or "").strip()
+
+    if not name and not pid:
+        print_roster(people)
+        try:
+            raw = input("観察者の名前を入力してください（新規はそのまま登録。ID でも可）: ").strip()
+        except EOFError:
+            raw = ""
+        if re.fullmatch(r"P\d+", raw, flags=re.IGNORECASE):
+            pid = raw
+        else:
+            name = raw
+    elif not name and pid:
+        found = next(
+            (p for p in people if str(p.get("id", "")).lower() == pid.lower()),
+            None,
+        )
+        if found and _norm_name(str(found.get("name", ""))):
+            name = _norm_name(str(found["name"]))
+        else:
+            print_roster(people)
+            try:
+                name = input(f"ID {pid} の名前を入力してください: ").strip()
+            except EOFError:
+                name = ""
+
+    return resolve_participant(name, pid)
+
+
 def append_rating(csv_path: Path, row: dict) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
@@ -280,6 +428,7 @@ def save_session(path: Path, data: dict) -> None:
 
 def create_session(
     participant_id: str,
+    participant_name: str,
     monitor_hz: float,
 ) -> tuple[dict, list[Trial], Path, Path]:
     """Always start a new run. Previous runs stay in timestamped folders."""
@@ -293,6 +442,7 @@ def create_session(
     trials = build_main_trials(seed)
     data = {
         "participant_id": participant_id,
+        "participant_name": participant_name,
         "seed": seed,
         "monitor_hz": monitor_hz,
         "target_hz": TARGET_HZ,
@@ -563,10 +713,12 @@ class ExperimentApp:
     def __init__(
         self,
         participant_id: str,
+        participant_name: str,
         asset_dir: Path,
         window_mode: bool = False,
     ) -> None:
         self.participant_id = participant_id
+        self.participant_name = participant_name
         self.asset_dir = asset_dir
         self.window_mode = window_mode
 
@@ -947,7 +1099,11 @@ class ExperimentApp:
         self.init_gl()
         try:
             self.session, self.main_trials, self.session_path, self.csv_path = (
-                create_session(self.participant_id, self.monitor_hz)
+                create_session(
+                    self.participant_id,
+                    self.participant_name,
+                    self.monitor_hz,
+                )
             )
             self.session["monitor_hz"] = self.monitor_hz
             self.session["swap_interval"] = 1
@@ -998,7 +1154,10 @@ class ExperimentApp:
     # ---- screens ----
 
     def _show_start(self) -> bool:
+        who = f"観察者: {self.participant_name}（{self.participant_id}）"
         body = [
+            who,
+            "",
             "これから画像が点滅します。",
             "「ちらつき」の強さだけを、1〜4 で答えてください。",
             "",
@@ -1150,6 +1309,7 @@ class ExperimentApp:
             self.csv_path,
             {
                 "participant_id": self.participant_id,
+                "participant_name": self.participant_name,
                 "trial_index": trial.trial_index,
                 "is_practice": int(trial.is_practice),
                 "image": trial.image,
@@ -1173,7 +1333,8 @@ class ExperimentApp:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Visibility (flicker) rating experiment @ 60 Hz")
-    p.add_argument("--id", type=str, default="", help="participant id (e.g. P01)")
+    p.add_argument("--id", type=str, default="", help="participant id (e.g. P01). omitted = auto")
+    p.add_argument("--name", type=str, default="", help="observer name (registered on first use)")
     p.add_argument(
         "--asset-dir",
         type=str,
@@ -1190,15 +1351,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    participant_id = args.id.strip()
-    if not participant_id:
-        try:
-            participant_id = input("観察者IDを入力してください (例: P01): ").strip()
-        except EOFError:
-            participant_id = ""
-    if not participant_id:
-        print("participant id is required", file=sys.stderr)
-        sys.exit(1)
+    participant_id, participant_name = prompt_identity(args)
+    print(f"[INFO] 観察者: {participant_name} ({participant_id})")
 
     asset_dir = Path(args.asset_dir)
     if not asset_dir.is_absolute():
@@ -1206,6 +1360,7 @@ def main() -> None:
 
     app = ExperimentApp(
         participant_id=participant_id,
+        participant_name=participant_name,
         asset_dir=asset_dir,
         window_mode=bool(args.window),
     )
