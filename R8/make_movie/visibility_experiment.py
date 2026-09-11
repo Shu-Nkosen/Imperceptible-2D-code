@@ -122,7 +122,7 @@ RATING_LABELS = {
     1: "全く分からない",
     2: "よく見ると、わずかにちらつく",
     3: "ちらつきが分かる",
-    4: "はっきりちらつく",
+    4: "QRコードのようなものが見える",
 }
 
 CSV_FIELDS = [
@@ -498,6 +498,7 @@ def make_hud(
     title: str = "",
     body_lines: Optional[list[str]] = None,
     footer: str = "",
+    params: str = "",
 ) -> np.ndarray:
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -505,18 +506,27 @@ def make_hud(
     font_md = _font(28)
     font_lg = _font(36)
 
-    # progress top-left
-    if progress:
-        draw.rectangle((12, 12, 220, 48), fill=(0, 0, 0, 140))
-        draw.text((20, 16), progress, fill=(255, 255, 255, 230), font=font_sm)
-
-    # abort button top-right
-    if show_abort:
+    def _draw_abort() -> None:
+        if not show_abort:
+            return
         bx0, by0, bx1, by1 = width - 140, 16, width - 24, 56
-        draw.rectangle((bx0, by0, bx1, by1), fill=(60, 60, 60, 200), outline=(200, 200, 200, 220))
+        draw.rectangle((bx0, by0, bx1, by1), fill=(60, 60, 60, 220), outline=(200, 200, 200, 220))
         draw.text((bx0 + 28, by0 + 8), "中断", fill=(255, 255, 255, 240), font=font_md)
 
-    # title / body (start / end screens)
+    def _draw_top_left() -> None:
+        if not progress and not params:
+            return
+        box_w = 520 if params else 220
+        box_h = 72 if params else 48
+        draw.rectangle((12, 12, 12 + box_w, 12 + box_h), fill=(0, 0, 0, 160))
+        if progress:
+            draw.text((20, 16), progress, fill=(255, 255, 255, 230), font=font_sm)
+        if params:
+            draw.text((20, 42), params, fill=(200, 200, 200, 220), font=font_sm)
+
+    _draw_abort()
+
+    # title / body (start / rating / end screens)
     if title:
         draw.rectangle((0, 0, width, height), fill=(20, 20, 20, 230))
         draw.text((width // 2 - 200, height // 5), title, fill=(255, 255, 255, 255), font=font_lg)
@@ -531,11 +541,10 @@ def make_hud(
                 fill=(200, 220, 255, 255),
                 font=font_md,
             )
-        # redraw abort on top of dark panel
-        if show_abort:
-            bx0, by0, bx1, by1 = width - 140, 16, width - 24, 56
-            draw.rectangle((bx0, by0, bx1, by1), fill=(60, 60, 60, 220), outline=(200, 200, 200, 220))
-            draw.text((bx0 + 28, by0 + 8), "中断", fill=(255, 255, 255, 240), font=font_md)
+        _draw_abort()
+
+    # last: dark panel must not cover progress / params
+    _draw_top_left()
 
     return np.array(img, dtype=np.uint8)
 
@@ -996,7 +1005,7 @@ class ExperimentApp:
             "1. 全く分からない",
             "2. よく見ると、わずかにちらつく",
             "3. ちらつきが分かる",
-            "4. はっきりちらつく",
+            "4. QRコードのようなものが見える",
             "",
             "最初に練習が 1 回あり、そのあと本番（48試行）に入ります。",
             "各試行は灰色 → 刺激3秒 → 画面が切り替わってから 1〜4 で回答。",
@@ -1114,7 +1123,7 @@ class ExperimentApp:
             "1. 全く分からない",
             "2. よく見ると、わずかにちらつく",
             "3. ちらつきが分かる",
-            "4. はっきりちらつく",
+            "4. QRコードのようなものが見える",
         ]
         self._set_hud(
             progress=progress,
@@ -1122,6 +1131,7 @@ class ExperimentApp:
             title="ちらつきの強さ",
             body_lines=rating_body,
             footer="1〜4 のキーで回答",
+            params=f"{trial.image}  {trial.channel}  {trial.intensity}",
         )
         self.rating_key = None
         t_rate_start = time.perf_counter()
