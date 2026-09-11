@@ -76,7 +76,7 @@ def _dbg(hypothesis_id: str, location: str, message: str, data: dict | None = No
     try:
         payload = {
             "sessionId": _DEBUG_SESSION,
-            "runId": "pre-fix",
+            "runId": "post-fix",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -605,6 +605,10 @@ class ExperimentApp:
         self.width = 1920
         self.height = 1080
         self.monitor_hz = float(TARGET_HZ)
+        self.swap_interval_n = 1
+        self.present_hz = float(TARGET_HZ)
+        self.hold_frames = 1
+        self.flicker_hz = 30.0
 
         self.tex_cache: dict[str, int] = {}
         self.tex_gray = 0
@@ -760,11 +764,13 @@ class ExperimentApp:
         n_frames: int,
         *,
         measure_fps: bool = False,
+        hold: int = 1,
     ) -> bool:
-        """Show tex for n_frames, or alternate (normal, inv) with f&1.
+        """Show tex for n_frames. Pair: alternate with present_session repeat=(hold).
 
-        Returns False if aborted / window closed.
+        flip = (f // hold) & 1 so 180 Hz + hold=3 => 30 Hz flicker.
         """
+        hold = max(1, int(hold))
         measure_n = min(60, n_frames) if measure_fps and not self._fps_logged else 0
         t0 = time.perf_counter() if measure_n else time.perf_counter()
         # #region agent log
@@ -781,6 +787,8 @@ class ExperimentApp:
                     "inv_tex": i_id,
                     "same_id": n_id == i_id,
                     "n_frames": n_frames,
+                    "hold": hold,
+                    "flicker_hz": (self.monitor_hz / (2.0 * hold)) if hold else None,
                     "type_name": type(tex_or_pair).__name__,
                 },
             )
@@ -789,7 +797,7 @@ class ExperimentApp:
                 "C",
                 "visibility_experiment.py:_present_frames",
                 "not a pair",
-                {"tex": int(tex_or_pair), "n_frames": n_frames},
+                {"tex": int(tex_or_pair), "n_frames": n_frames, "hold": hold},
             )
         self._dbg_bind_left = 4
         # #endregion
@@ -798,19 +806,18 @@ class ExperimentApp:
                 return False
             if isinstance(tex_or_pair, tuple):
                 normal_tex, inv_tex = tex_or_pair
-                tex = inv_tex if (f & 1) else normal_tex
+                tex = inv_tex if ((f // hold) & 1) else normal_tex
             else:
                 tex = tex_or_pair
             # #region agent log
-            if f < 8:
+            if f < 12:
+                use_inv = is_pair and ((f // hold) & 1)
                 first_choices.append(
                     {
                         "f": f,
                         "tex": int(tex),
                         "branch": (
-                            "inv"
-                            if (is_pair and (f & 1))
-                            else ("normal" if is_pair else "single")
+                            "inv" if use_inv else ("normal" if is_pair else "single")
                         ),
                     }
                 )
@@ -831,6 +838,10 @@ class ExperimentApp:
                             "elapsed_s": elapsed,
                             "measure_n": measure_n,
                             "monitor_hz": self.monitor_hz,
+                            "swap_interval": 1,
+                            "hold_frames": self.hold_frames,
+                            "present_hz": self.monitor_hz,
+                            "flicker_hz": self.flicker_hz,
                         },
                     )
                     # #endregion
@@ -866,11 +877,22 @@ class ExperimentApp:
         self.width = int(mode.size.width)
         self.height = int(mode.size.height)
         self.monitor_hz = float(mode.refresh_rate) if mode.refresh_rate else float(TARGET_HZ)
+        # Always vsync 1:1 with the panel. 30 Hz flicker via hold (present_session --repeat),
+        # because glfw.swap_interval(n>1) is often ignored on Windows.
+        self.swap_interval_n = 1
+        self.hold_frames = max(1, int(round(self.monitor_hz / TARGET_HZ)))
+        self.present_hz = self.monitor_hz
+        self.flicker_hz = self.monitor_hz / (2.0 * self.hold_frames)
         print(f"[INFO] monitor {self.width}x{self.height} @ {self.monitor_hz:.1f} Hz")
+        print(
+            f"[INFO] swap_interval=1 hold={self.hold_frames} => "
+            f"flicker ~{self.flicker_hz:.1f} Hz (target 30 Hz)"
+        )
         if abs(self.monitor_hz - TARGET_HZ) > 1.5:
             print(
-                f"[WARN] Expected ~{TARGET_HZ} Hz display. "
-                f"Set OS refresh to {TARGET_HZ} Hz before running."
+                f"[WARN] OS refresh is {self.monitor_hz:.0f} Hz, not {TARGET_HZ}. "
+                f"Holding each image {self.hold_frames} frames (present_session --repeat) "
+                "so flicker stays ~30 Hz."
             )
 
         # Match present_session.c: video-mode hints before exclusive fullscreen
@@ -900,7 +922,7 @@ class ExperimentApp:
             raise SystemExit("Window creation failed")
 
         glfw.make_context_current(self.window)
-        glfw.swap_interval(1)  # vsync; with 60 Hz monitor => ~60 fps
+        glfw.swap_interval(1)
         glfw.set_key_callback(self.window, self._on_key)
         glfw.set_mouse_button_callback(self.window, self._on_mouse)
         if not self.window_mode:
@@ -913,7 +935,7 @@ class ExperimentApp:
         print(
             f"[INFO] present frames: ISI={frames_for_seconds(ISI_SEC, self.monitor_hz)} "
             f"stim={frames_for_seconds(STIM_SEC, self.monitor_hz)} "
-            f"(@ {self.monitor_hz:.1f} Hz)"
+            f"(@ {self.monitor_hz:.1f} Hz vsync, hold={self.hold_frames})"
         )
         # #region agent log
         print(f"[DEBUG] log -> {_DEBUG_LOG}")
@@ -927,6 +949,9 @@ class ExperimentApp:
                 "monitor_hz": self.monitor_hz,
                 "window_mode": self.window_mode,
                 "swap_interval": 1,
+                "hold_frames": self.hold_frames,
+                "flicker_hz": self.flicker_hz,
+                "present_hz": self.monitor_hz,
             },
         )
         # #endregion
@@ -956,6 +981,10 @@ class ExperimentApp:
                 load_or_create_session(self.participant_id, self.monitor_hz)
             )
             self.session["monitor_hz"] = self.monitor_hz
+            self.session["swap_interval"] = 1
+            self.session["hold_frames"] = self.hold_frames
+            self.session["flicker_hz"] = self.flicker_hz
+            self.session["present_hz"] = self.monitor_hz
             save_session(self.session_path, self.session)
 
             done = load_completed_ratings(self.csv_path)
@@ -1105,6 +1134,10 @@ class ExperimentApp:
 
         isi_frames = frames_for_seconds(ISI_SEC, self.monitor_hz)
         stim_frames = frames_for_seconds(STIM_SEC, self.monitor_hz)
+        hold = self.hold_frames
+        if trial.is_practice:
+            # ~8 Hz so the two frames are obviously different (practice only)
+            hold = max(self.hold_frames, max(1, int(round(self.monitor_hz / 16.0))))
 
         # --- ISI gray (frame-counted; progress HUD only, no flicker) ---
         self._set_hud(
@@ -1128,6 +1161,7 @@ class ExperimentApp:
             (normal_tex, inv_tex),
             stim_frames,
             measure_fps=True,
+            hold=hold,
         ):
             return False
 

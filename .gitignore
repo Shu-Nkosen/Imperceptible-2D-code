@@ -5,6 +5,7 @@ stable_diffusion/
 *.exe
 *.pdf
 *.pptx
+debug-*.log
 
 # R8 talk slides / personal & temp (presentation content stays out of git)
 R8/_tmp_slide_assets/
