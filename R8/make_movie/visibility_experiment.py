@@ -66,6 +66,36 @@ from OpenGL.GL import (
 )
 from PIL import Image, ImageDraw, ImageFont
 
+# #region agent log
+_DEBUG_LOG = Path(__file__).resolve().parents[2] / "debug-d29637.log"
+_DEBUG_LOG_LOCAL = Path(__file__).resolve().parent / "debug-d29637.log"
+_DEBUG_SESSION = "d29637"
+
+
+def _dbg(hypothesis_id: str, location: str, message: str, data: dict | None = None) -> None:
+    try:
+        payload = {
+            "sessionId": _DEBUG_SESSION,
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        line = json.dumps(payload, ensure_ascii=False) + "\n"
+        for path in (_DEBUG_LOG, _DEBUG_LOG_LOCAL):
+            try:
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(line)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+# #endregion
+
 # ---------------------------------------------------------------------------
 # Experiment constants
 # ---------------------------------------------------------------------------
@@ -339,6 +369,20 @@ def load_texture_from_path(path: Path, size: tuple[int, int] | None = None) -> i
     if size is not None and (img.width, img.height) != size:
         img = img.resize(size, Image.NEAREST)
     data = np.array(img, dtype=np.uint8)
+    # #region agent log
+    _dbg(
+        "E",
+        "visibility_experiment.py:load_texture_from_path",
+        "loaded png",
+        {
+            "path": str(path.name),
+            "shape": list(data.shape),
+            "mean": float(data.mean()),
+            "sum": int(data.sum()),
+            "resized_to": list(size) if size is not None else None,
+        },
+    )
+    # #endregion
     tex = int(glGenTextures(1))
     glBindTexture(GL_TEXTURE_2D, tex)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
@@ -629,6 +673,32 @@ class ExperimentApp:
             self.tex_cache[trial.normal_name] = load_texture_from_path(n_path, size)
         if trial.inv_name not in self.tex_cache:
             self.tex_cache[trial.inv_name] = load_texture_from_path(i_path, size)
+        # #region agent log
+        try:
+            na = np.array(Image.open(n_path).convert("RGB"), dtype=np.int16)
+            ia = np.array(Image.open(i_path).convert("RGB"), dtype=np.int16)
+            d = np.abs(na - ia)
+            _dbg(
+                "E",
+                "visibility_experiment.py:_ensure_pair",
+                "png pixel diff",
+                {
+                    "normal": trial.normal_name,
+                    "inv": trial.inv_name,
+                    "max_abs": int(d.max()),
+                    "mean_abs": float(d.mean()),
+                    "normal_tex": int(self.tex_cache[trial.normal_name]),
+                    "inv_tex": int(self.tex_cache[trial.inv_name]),
+                },
+            )
+        except Exception as e:
+            _dbg(
+                "E",
+                "visibility_experiment.py:_ensure_pair",
+                "png diff failed",
+                {"error": str(e)},
+            )
+        # #endregion
         return self.tex_cache[trial.normal_name], self.tex_cache[trial.inv_name]
 
     def _set_hud(self, **kwargs) -> None:
@@ -668,6 +738,19 @@ class ExperimentApp:
     def _present_texture(self, tex: int) -> None:
         """present_session-style: one texture, no HUD, one swap = one display frame."""
         draw_fullscreen(tex)
+        # #region agent log
+        if getattr(self, "_dbg_bind_left", 0) > 0:
+            self._dbg_bind_left -= 1
+            from OpenGL.GL import glGetError
+
+            err = int(glGetError())
+            _dbg(
+                "D",
+                "visibility_experiment.py:_present_texture",
+                "after draw",
+                {"tex": int(tex), "glError": err},
+            )
+        # #endregion
         glfw.swap_buffers(self.window)
         glfw.poll_events()
 
@@ -683,7 +766,33 @@ class ExperimentApp:
         Returns False if aborted / window closed.
         """
         measure_n = min(60, n_frames) if measure_fps and not self._fps_logged else 0
-        t0 = time.perf_counter() if measure_n else 0.0
+        t0 = time.perf_counter() if measure_n else time.perf_counter()
+        # #region agent log
+        first_choices: list[dict] = []
+        is_pair = isinstance(tex_or_pair, tuple)
+        if is_pair:
+            n_id, i_id = int(tex_or_pair[0]), int(tex_or_pair[1])
+            _dbg(
+                "A",
+                "visibility_experiment.py:_present_frames",
+                "pair ids",
+                {
+                    "normal_tex": n_id,
+                    "inv_tex": i_id,
+                    "same_id": n_id == i_id,
+                    "n_frames": n_frames,
+                    "type_name": type(tex_or_pair).__name__,
+                },
+            )
+        else:
+            _dbg(
+                "C",
+                "visibility_experiment.py:_present_frames",
+                "not a pair",
+                {"tex": int(tex_or_pair), "n_frames": n_frames},
+            )
+        self._dbg_bind_left = 4
+        # #endregion
         for f in range(n_frames):
             if glfw.window_should_close(self.window) or self.abort_requested:
                 return False
@@ -692,18 +801,58 @@ class ExperimentApp:
                 tex = inv_tex if (f & 1) else normal_tex
             else:
                 tex = tex_or_pair
+            # #region agent log
+            if f < 8:
+                first_choices.append(
+                    {
+                        "f": f,
+                        "tex": int(tex),
+                        "branch": (
+                            "inv"
+                            if (is_pair and (f & 1))
+                            else ("normal" if is_pair else "single")
+                        ),
+                    }
+                )
+            # #endregion
             self._present_texture(tex)
             if measure_n and f + 1 == measure_n:
                 elapsed = time.perf_counter() - t0
                 if elapsed > 0:
                     hz = measure_n / elapsed
                     print(f"[INFO] present ~{hz:.1f} Hz (target {TARGET_HZ})")
+                    # #region agent log
+                    _dbg(
+                        "B",
+                        "visibility_experiment.py:_present_frames",
+                        "measured present hz",
+                        {
+                            "hz": hz,
+                            "elapsed_s": elapsed,
+                            "measure_n": measure_n,
+                            "monitor_hz": self.monitor_hz,
+                        },
+                    )
+                    # #endregion
                     if abs(hz - TARGET_HZ) > 3.0:
                         print(
                             f"[WARN] Measured present rate far from {TARGET_HZ} Hz. "
                             "Check OS refresh / exclusive fullscreen / vsync."
                         )
                     self._fps_logged = True
+        # #region agent log
+        _dbg(
+            "C",
+            "visibility_experiment.py:_present_frames",
+            "stim finished",
+            {
+                "first_choices": first_choices,
+                "total_frames": n_frames,
+                "wall_s": time.perf_counter() - t0,
+                "unique_tex_in_first8": sorted({c["tex"] for c in first_choices}),
+            },
+        )
+        # #endregion
         return True
 
     # ---- lifecycle ----
@@ -766,6 +915,21 @@ class ExperimentApp:
             f"stim={frames_for_seconds(STIM_SEC, self.monitor_hz)} "
             f"(@ {self.monitor_hz:.1f} Hz)"
         )
+        # #region agent log
+        print(f"[DEBUG] log -> {_DEBUG_LOG}")
+        _dbg(
+            "B",
+            "visibility_experiment.py:init_gl",
+            "gl init",
+            {
+                "width": self.width,
+                "height": self.height,
+                "monitor_hz": self.monitor_hz,
+                "window_mode": self.window_mode,
+                "swap_interval": 1,
+            },
+        )
+        # #endregion
 
     def shutdown(self) -> None:
         for tex in list(self.tex_cache.values()):
