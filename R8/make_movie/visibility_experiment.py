@@ -112,7 +112,7 @@ PRACTICE_CHANNEL = "G"
 PRACTICE_INTENSITY = 8
 
 ISI_SEC = 1.0
-STIM_SEC = 5.0
+STIM_SEC = 3.0
 TARGET_HZ = 60
 
 ISI_GRAY = (128, 128, 128)
@@ -260,32 +260,6 @@ def session_dir(participant_id: str) -> Path:
     return RESULTS_ROOT / safe
 
 
-def load_completed_ratings(csv_path: Path) -> set[tuple[bool, int]]:
-    """Return set of (is_practice, trial_index) that already have a rating."""
-    done: set[tuple[bool, int]] = set()
-    if not csv_path.exists():
-        return done
-    with csv_path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row.get("aborted", "").strip().lower() in ("1", "true", "yes"):
-                continue
-            rating = (row.get("rating") or "").strip()
-            if not rating:
-                continue
-            is_practice = str(row.get("is_practice", "")).strip().lower() in (
-                "1",
-                "true",
-                "yes",
-            )
-            try:
-                tidx = int(row["trial_index"])
-            except (KeyError, ValueError):
-                continue
-            done.add((is_practice, tidx))
-    return done
-
-
 def append_rating(csv_path: Path, row: dict) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not csv_path.exists() or csv_path.stat().st_size == 0
@@ -304,32 +278,16 @@ def save_session(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def load_or_create_session(
+def create_session(
     participant_id: str,
     monitor_hz: float,
 ) -> tuple[dict, list[Trial], Path, Path]:
-    out = session_dir(participant_id)
+    """Always start a new run. Previous runs stay in timestamped folders."""
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out = session_dir(participant_id) / stamp
     out.mkdir(parents=True, exist_ok=True)
     session_path = out / "session.json"
     csv_path = out / "ratings.csv"
-
-    if session_path.exists():
-        data = json.loads(session_path.read_text(encoding="utf-8"))
-        order = data["trial_order"]
-        trials = [
-            Trial(
-                trial_index=int(t["trial_index"]),
-                is_practice=False,
-                image=t["image"],
-                channel=t["channel"],
-                intensity=int(t["intensity"]),
-            )
-            for t in order
-        ]
-        data["aborted"] = False
-        data["resumed_at"] = datetime.now(timezone.utc).isoformat()
-        save_session(session_path, data)
-        return data, trials, session_path, csv_path
 
     seed = random.randrange(0, 2**31 - 1)
     trials = build_main_trials(seed)
@@ -338,6 +296,7 @@ def load_or_create_session(
         "seed": seed,
         "monitor_hz": monitor_hz,
         "target_hz": TARGET_HZ,
+        "stim_sec": STIM_SEC,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "practice_done": False,
         "aborted": False,
@@ -353,6 +312,7 @@ def load_or_create_session(
         ],
     }
     save_session(session_path, data)
+    print(f"[INFO] new run -> {out}")
     return data, trials, session_path, csv_path
 
 
@@ -978,7 +938,7 @@ class ExperimentApp:
         self.init_gl()
         try:
             self.session, self.main_trials, self.session_path, self.csv_path = (
-                load_or_create_session(self.participant_id, self.monitor_hz)
+                create_session(self.participant_id, self.monitor_hz)
             )
             self.session["monitor_hz"] = self.monitor_hz
             self.session["swap_interval"] = 1
@@ -987,31 +947,22 @@ class ExperimentApp:
             self.session["present_hz"] = self.monitor_hz
             save_session(self.session_path, self.session)
 
-            done = load_completed_ratings(self.csv_path)
-            practice_done = self.session.get("practice_done", False) or (True, 0) in done
-
-            if not self._show_start(resuming=bool(done) or practice_done):
+            if not self._show_start():
                 self._abort_session()
                 return
 
-            if not practice_done:
-                ok = self._run_trial(practice_trial(), progress="練習 1/1")
-                if not ok:
-                    self._abort_session()
-                    return
-                self.session["practice_done"] = True
-                save_session(self.session_path, self.session)
+            ok = self._run_trial(practice_trial(), progress="練習 1/1")
+            if not ok:
+                self._abort_session()
+                return
+            self.session["practice_done"] = True
+            save_session(self.session_path, self.session)
 
-            remaining = [t for t in self.main_trials if (False, t.trial_index) not in done]
-            if remaining:
-                resuming_main = any(not is_prac for is_prac, _ in done)
-                if not self._show_main_ready(resuming=resuming_main):
-                    self._abort_session()
-                    return
+            if not self._show_main_ready():
+                self._abort_session()
+                return
 
             for trial in self.main_trials:
-                if (False, trial.trial_index) in done:
-                    continue
                 progress = f"{trial.trial_index}/48"
                 ok = self._run_trial(trial, progress=progress)
                 if not ok:
@@ -1030,11 +981,14 @@ class ExperimentApp:
         self.session["aborted"] = True
         self.session["aborted_at"] = datetime.now(timezone.utc).isoformat()
         save_session(self.session_path, self.session)
-        print(f"[INFO] Aborted. Progress saved under {self.csv_path.parent}")
+        print(
+            f"[INFO] Aborted. This run was saved under {self.csv_path.parent} "
+            "(next launch starts a new run from the beginning)."
+        )
 
     # ---- screens ----
 
-    def _show_start(self, resuming: bool) -> bool:
+    def _show_start(self) -> bool:
         body = [
             "これから画像が点滅します。",
             "「ちらつき」の強さだけを、1〜4 で答えてください。",
@@ -1045,13 +999,11 @@ class ExperimentApp:
             "4. はっきりちらつく",
             "",
             "最初に練習が 1 回あり、そのあと本番（48試行）に入ります。",
-            "各試行は灰色 → 刺激5秒 → 画面が切り替わってから 1〜4 で回答。",
+            "各試行は灰色 → 刺激3秒 → 画面が切り替わってから 1〜4 で回答。",
             "視聴距離は実験者の指示どおりに固定してください。",
-            "右上「中断」または Esc で中断できます（途中まで保存されます）。",
+            "右上「中断」または Esc で中断できます。",
+            "中断した場合も、次の起動では最初から取り直します。",
         ]
-        if resuming:
-            body.append("")
-            body.append("前回の続きから再開します。")
         self.enter_pressed = False
         self.abort_requested = False
         self._set_hud(
@@ -1069,26 +1021,15 @@ class ExperimentApp:
                 return True
         return False
 
-    def _show_main_ready(self, resuming: bool) -> bool:
-        if resuming:
-            title = "本番の続き"
-            body = [
-                "練習は終わりです。ここからが本番です。",
-                "前回の続きから再開します。",
-                "",
-                "やり方は練習と同じです。",
-                "灰色 → 刺激5秒 → 画面が切り替わってから 1〜4 で回答。",
-            ]
-            footer = "Enter で再開"
-        else:
-            title = "本番を始めます"
-            body = [
-                "練習は終わりです。ここからが本番です（48試行）。",
-                "",
-                "やり方は練習と同じです。",
-                "灰色 → 刺激5秒 → 画面が切り替わってから 1〜4 で回答。",
-            ]
-            footer = "Enter で本番開始"
+    def _show_main_ready(self) -> bool:
+        title = "本番を始めます"
+        body = [
+            "練習は終わりです。ここからが本番です（48試行）。",
+            "",
+            "やり方は練習と同じです。",
+            "灰色 → 刺激3秒 → 画面が切り替わってから 1〜4 で回答。",
+        ]
+        footer = "Enter で本番開始"
         self.enter_pressed = False
         self.abort_requested = False
         self.rating_key = None
