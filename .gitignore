@@ -5,7 +5,6 @@ stable_diffusion/
 *.exe
 *.pdf
 *.pptx
-debug-*.log
 
 # R8 talk slides / personal & temp (presentation content stays out of git)
 R8/_tmp_slide_assets/
@@ -22,7 +21,6 @@ R8/make_movie/*_*_normal*.png
 R8/make_movie/*_*_inv*.png
 R8/make_movie/slate_*.png
 R8/make_movie/manifests/
-R8/make_movie/visibility_results/
 R8/analyze_code/out/**/*.png
 R8/analyze_code/out_hard/**/*.png
 R8/analyze_code/out_mid/**/*.png
