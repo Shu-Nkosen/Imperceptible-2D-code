@@ -1,0 +1,2 @@
+﻿folder,frame_1,frame_2,diff_image,analysis_image,decoded_text,success,method,note,recall,precision,accuracy,noise,gt_note,task_key,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold
+rice_R_4,frame_00000.png,frame_00119.png,rice_R_4/rgb_max_stat_std_gray/00000-00119-FRAME_rgbmax_scale1.00.png,,,0,decode失敗,QR未検出,0.181551,0.368823,0.585638,0.175816,,stat_std_num:stat:std:None:None:0:None:gray:0,stat,,std,,0

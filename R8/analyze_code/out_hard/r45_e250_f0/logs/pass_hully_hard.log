@@ -1,0 +1,138 @@
+[OK] SYNC at frame=615, fps=59.9877
+[INFO] GT QR slot=start start_sec_from_sync=5.500 dur=3.000 samples_ok=5
+[INFO] GT QR slot=mid start_sec_from_sync=188.500 dur=3.000 samples_ok=5
+[INFO] GT QR slot=end start_sec_from_sync=371.500 dur=3.000 samples_ok=5
+[OK] wrote GT mask: C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\out_hard\r45_e250_f0\frame_QR.png (from 15 samples)
+[INFO] hard-sweeps on: pair_each_end=0 fourier_band_radius=2 passes=11 (incl. *_num gray)
+[INFO] pass=pair diff_mode=pair stat_kind=- repr=binary sweeps=7
+[INFO] pass=accum diff_mode=accum stat_kind=- repr=binary sweeps=35
+[INFO] pass=stat_std diff_mode=stat stat_kind=std repr=binary sweeps=7
+[INFO] pass=stat_var diff_mode=stat stat_kind=var repr=binary sweeps=6
+[INFO] pass=lockin diff_mode=lockin stat_kind=- repr=binary sweeps=105
+[INFO] pass=fourier diff_mode=fourier stat_kind=- repr=binary sweeps=35 band_radius=2
+[INFO] pass=accum_num diff_mode=accum stat_kind=- repr=gray sweeps=5
+[INFO] pass=stat_std_num diff_mode=stat stat_kind=std repr=gray sweeps=1
+[INFO] pass=stat_var_num diff_mode=stat stat_kind=var repr=gray sweeps=1
+[INFO] pass=lockin_num diff_mode=lockin stat_kind=- repr=gray sweeps=15
+[INFO] pass=fourier_num diff_mode=fourier stat_kind=- repr=gray sweeps=5 band_radius=2
+[INFO] (1/60) extract rice_R_4: frames=120
+[INFO] (1/60) saved all diff PNGs=2400
+[INFO] (2/60) extract rice_R_8: frames=120
+[INFO] (2/60) saved all diff PNGs=2400
+[INFO] (3/60) extract rice_R_12: frames=120
+[INFO] (3/60) saved all diff PNGs=2400
+[INFO] (4/60) extract nagaoka_fireworks_R_4: frames=120
+[INFO] (4/60) saved all diff PNGs=2400
+[INFO] (5/60) extract nagaoka_fireworks_R_8: frames=120
+[INFO] (5/60) saved all diff PNGs=2400
+[INFO] (6/60) extract nagaoka_fireworks_R_12: frames=120
+[INFO] (6/60) saved all diff PNGs=2400
+[INFO] (7/60) extract hocho_R_4: frames=120
+[INFO] (7/60) saved all diff PNGs=2400
+[INFO] (8/60) extract hocho_R_8: frames=120
+[INFO] (8/60) saved all diff PNGs=2400
+[INFO] (9/60) extract hocho_R_12: frames=120
+[INFO] (9/60) saved all diff PNGs=2400
+[INFO] (10/60) extract ex_R_4: frames=120
+[INFO] (10/60) saved all diff PNGs=2400
+[INFO] (11/60) extract ex_R_8: frames=120
+[INFO] (11/60) saved all diff PNGs=2400
+[INFO] (12/60) extract ex_R_12: frames=120
+[INFO] (12/60) saved all diff PNGs=2400
+[INFO] (13/60) extract rice_G_4: frames=120
+[INFO] (13/60) saved all diff PNGs=2400
+[INFO] (14/60) extract rice_G_8: frames=120
+[INFO] (14/60) saved all diff PNGs=2400
+[INFO] (15/60) extract rice_G_12: frames=120
+[INFO] (15/60) saved all diff PNGs=2400
+[INFO] (16/60) extract nagaoka_fireworks_G_4: frames=120
+[INFO] (16/60) saved all diff PNGs=2400
+[INFO] (17/60) extract nagaoka_fireworks_G_8: frames=120
+[INFO] (17/60) saved all diff PNGs=2400
+[INFO] (18/60) extract nagaoka_fireworks_G_12: frames=120
+[INFO] (18/60) saved all diff PNGs=2400
+[INFO] (19/60) extract hocho_G_4: frames=120
+[INFO] (19/60) saved all diff PNGs=2400
+[INFO] (20/60) extract hocho_G_8: frames=120
+[INFO] (20/60) saved all diff PNGs=2400
+[INFO] (21/60) extract hocho_G_12: frames=120
+[INFO] (21/60) saved all diff PNGs=2400
+[INFO] (22/60) extract ex_G_4: frames=120
+[INFO] (22/60) saved all diff PNGs=2400
+[INFO] (23/60) extract ex_G_8: frames=120
+[INFO] (23/60) saved all diff PNGs=2400
+[INFO] (24/60) extract ex_G_12: frames=120
+[INFO] (24/60) saved all diff PNGs=2400
+[INFO] (25/60) extract rice_B_4: frames=120
+[INFO] (25/60) saved all diff PNGs=2400
+[INFO] (26/60) extract rice_B_8: frames=120
+[INFO] (26/60) saved all diff PNGs=2400
+[INFO] (27/60) extract rice_B_12: frames=120
+[INFO] (27/60) saved all diff PNGs=2400
+[INFO] (28/60) extract nagaoka_fireworks_B_4: frames=120
+[INFO] (28/60) saved all diff PNGs=2400
+[INFO] (29/60) extract nagaoka_fireworks_B_8: frames=120
+[INFO] (29/60) saved all diff PNGs=2400
+[INFO] (30/60) extract nagaoka_fireworks_B_12: frames=120
+[INFO] (30/60) saved all diff PNGs=2400
+[INFO] (31/60) extract hocho_B_4: frames=120
+[INFO] (31/60) saved all diff PNGs=2400
+[INFO] (32/60) extract hocho_B_8: frames=120
+[INFO] (32/60) saved all diff PNGs=2400
+[INFO] (33/60) extract hocho_B_12: frames=120
+[INFO] (33/60) saved all diff PNGs=2400
+[INFO] (34/60) extract ex_B_4: frames=120
+[INFO] (34/60) saved all diff PNGs=2400
+[INFO] (35/60) extract ex_B_8: frames=120
+[INFO] (35/60) saved all diff PNGs=2400
+[INFO] (36/60) extract ex_B_12: frames=120
+[INFO] (36/60) saved all diff PNGs=2400
+[INFO] (37/60) extract rice_I_4: frames=120
+[INFO] (37/60) saved all diff PNGs=2400
+[INFO] (38/60) extract rice_I_8: frames=120
+[INFO] (38/60) saved all diff PNGs=2400
+[INFO] (39/60) extract rice_I_12: frames=120
+[INFO] (39/60) saved all diff PNGs=2400
+[INFO] (40/60) extract nagaoka_fireworks_I_4: frames=120
+[INFO] (40/60) saved all diff PNGs=2400
+[INFO] (41/60) extract nagaoka_fireworks_I_8: frames=120
+[INFO] (41/60) saved all diff PNGs=2400
+[INFO] (42/60) extract nagaoka_fireworks_I_12: frames=120
+[INFO] (42/60) saved all diff PNGs=2400
+[INFO] (43/60) extract hocho_I_4: frames=120
+[INFO] (43/60) saved all diff PNGs=2400
+[INFO] (44/60) extract hocho_I_8: frames=120
+[INFO] (44/60) saved all diff PNGs=2400
+[INFO] (45/60) extract hocho_I_12: frames=120
+[INFO] (45/60) saved all diff PNGs=2400
+[INFO] (46/60) extract ex_I_4: frames=120
+[INFO] (46/60) saved all diff PNGs=2400
+[INFO] (47/60) extract ex_I_8: frames=120
+[INFO] (47/60) saved all diff PNGs=2400
+[INFO] (48/60) extract ex_I_12: frames=120
+[INFO] (48/60) saved all diff PNGs=2400
+[INFO] (49/60) extract rice_X_4: frames=120
+[INFO] (49/60) saved all diff PNGs=2400
+[INFO] (50/60) extract rice_X_8: frames=120
+[INFO] (50/60) saved all diff PNGs=2400
+[INFO] (51/60) extract rice_X_12: frames=120
+[INFO] (51/60) saved all diff PNGs=2400
+[INFO] (52/60) extract nagaoka_fireworks_X_4: frames=120
+[INFO] (52/60) saved all diff PNGs=2400
+[INFO] (53/60) extract nagaoka_fireworks_X_8: frames=120
+[INFO] (53/60) saved all diff PNGs=2400
+[INFO] (54/60) extract nagaoka_fireworks_X_12: frames=120
+[INFO] (54/60) saved all diff PNGs=2400
+[INFO] (55/60) extract hocho_X_4: frames=120
+[INFO] (55/60) saved all diff PNGs=2400
+[INFO] (56/60) extract hocho_X_8: frames=120
+[INFO] (56/60) saved all diff PNGs=2400
+[INFO] (57/60) extract hocho_X_12: frames=120
+[INFO] (57/60) saved all diff PNGs=2400
+[INFO] (58/60) extract ex_X_4: frames=120
+[INFO] (58/60) saved all diff PNGs=2400
+[INFO] (59/60) extract ex_X_8: frames=120
+[INFO] (59/60) saved all diff PNGs=2400
+[INFO] (60/60) extract ex_X_12: frames=120
+[INFO] (60/60) saved all diff PNGs=2400
+[OK] hully finished in 58056.3s (extracted=60, reused=0)
