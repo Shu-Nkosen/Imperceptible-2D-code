@@ -349,32 +349,26 @@ def resolve_participant(name: str, id_hint: str) -> tuple[str, str]:
 
 def prompt_identity(args: argparse.Namespace) -> tuple[str, str]:
     people = load_roster()
-    name = _norm_name(getattr(args, "name", "") or "")
     pid = (getattr(args, "id", "") or "").strip()
+    preset = _norm_name(getattr(args, "name", "") or "")
 
-    if not name and not pid:
-        print_roster(people)
+    print_roster(people)
+    hint = f"（空Enterで {preset}）" if preset else ""
+    try:
+        raw = input(f"観察者の名前を入力してください{hint}: ").strip()
+    except EOFError:
+        raw = ""
+    if not raw:
+        raw = preset
+    if re.fullmatch(r"P\d+", raw, flags=re.IGNORECASE):
+        pid = raw
+        name = ""
         try:
-            raw = input("観察者の名前を入力してください（新規はそのまま登録。ID でも可）: ").strip()
+            name = input(f"ID {pid} の名前を入力してください: ").strip()
         except EOFError:
-            raw = ""
-        if re.fullmatch(r"P\d+", raw, flags=re.IGNORECASE):
-            pid = raw
-        else:
-            name = raw
-    elif not name and pid:
-        found = next(
-            (p for p in people if str(p.get("id", "")).lower() == pid.lower()),
-            None,
-        )
-        if found and _norm_name(str(found.get("name", ""))):
-            name = _norm_name(str(found["name"]))
-        else:
-            print_roster(people)
-            try:
-                name = input(f"ID {pid} の名前を入力してください: ").strip()
-            except EOFError:
-                name = ""
+            name = ""
+    else:
+        name = raw
 
     return resolve_participant(name, pid)
 
