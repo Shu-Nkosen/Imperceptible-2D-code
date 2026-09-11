@@ -2,14 +2,14 @@
 """Visibility (flicker) rating experiment at 60 Hz display.
 
 Uses existing normal/inv embedded PNGs from gen_assets.py.
-Practice: 1 trial. Main: 4 images x RGB x intensities 4/8/12/16 = 48 trials.
+Practice: 1 trial. Main: 4 images x RGB x intensities 4/8/10/12/16 = 60 trials.
 
 Usage:
   python visibility_experiment.py
   python visibility_experiment.py --name 山田
   python visibility_experiment.py --id P01
   python gen_assets.py --images rice,nagaoka_fireworks,hocho,ex \\
-      --intensities 4,8,12,16 --channels R,G,B --clip-margin 16
+      --intensities 4,8,10,12,16 --channels R,G,B --clip-margin 16
 """
 
 from __future__ import annotations
@@ -69,36 +69,6 @@ from OpenGL.GL import (
 )
 from PIL import Image, ImageDraw, ImageFont
 
-# #region agent log
-_DEBUG_LOG = Path(__file__).resolve().parents[2] / "debug-d29637.log"
-_DEBUG_LOG_LOCAL = Path(__file__).resolve().parent / "debug-d29637.log"
-_DEBUG_SESSION = "d29637"
-
-
-def _dbg(hypothesis_id: str, location: str, message: str, data: dict | None = None) -> None:
-    try:
-        payload = {
-            "sessionId": _DEBUG_SESSION,
-            "runId": "post-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        line = json.dumps(payload, ensure_ascii=False) + "\n"
-        for path in (_DEBUG_LOG, _DEBUG_LOG_LOCAL):
-            try:
-                with path.open("a", encoding="utf-8") as f:
-                    f.write(line)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
-# #endregion
-
 # ---------------------------------------------------------------------------
 # Experiment constants
 # ---------------------------------------------------------------------------
@@ -108,7 +78,8 @@ RESULTS_ROOT = SCRIPT_DIR / "visibility_results"
 
 IMAGES = ["ex", "rice", "hocho", "nagaoka_fireworks"]
 CHANNELS = ["R", "G", "B"]
-INTENSITIES = [4, 8, 12, 16]
+INTENSITIES = [4, 8, 10, 12, 16]
+N_MAIN = len(IMAGES) * len(CHANNELS) * len(INTENSITIES)
 
 PRACTICE_IMAGE = "rice"
 PRACTICE_CHANNEL = "G"
@@ -171,7 +142,7 @@ def _time_end() -> None:
 
 @dataclass(frozen=True)
 class Trial:
-    trial_index: int  # 0 for practice, 1..48 for main
+    trial_index: int  # 0 for practice, 1..N_MAIN for main
     is_practice: bool
     image: str
     channel: str
@@ -247,7 +218,7 @@ def check_assets(asset_dir: Path) -> None:
         raise SystemExit(
             "Missing embedded assets. Generate with:\n"
             "  python gen_assets.py --images rice,nagaoka_fireworks,hocho,ex "
-            "--intensities 4,8,12,16 --channels R,G,B --clip-margin 16\n"
+            "--intensities 4,8,10,12,16 --channels R,G,B --clip-margin 16\n"
             f"Missing ({len(missing)}):\n  {preview}{more}"
         )
 
@@ -479,20 +450,6 @@ def load_texture_from_path(path: Path, size: tuple[int, int] | None = None) -> i
     if size is not None and (img.width, img.height) != size:
         img = img.resize(size, Image.NEAREST)
     data = np.array(img, dtype=np.uint8)
-    # #region agent log
-    _dbg(
-        "E",
-        "visibility_experiment.py:load_texture_from_path",
-        "loaded png",
-        {
-            "path": str(path.name),
-            "shape": list(data.shape),
-            "mean": float(data.mean()),
-            "sum": int(data.sum()),
-            "resized_to": list(size) if size is not None else None,
-        },
-    )
-    # #endregion
     tex = int(glGenTextures(1))
     glBindTexture(GL_TEXTURE_2D, tex)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
@@ -798,32 +755,6 @@ class ExperimentApp:
             self.tex_cache[trial.normal_name] = load_texture_from_path(n_path, size)
         if trial.inv_name not in self.tex_cache:
             self.tex_cache[trial.inv_name] = load_texture_from_path(i_path, size)
-        # #region agent log
-        try:
-            na = np.array(Image.open(n_path).convert("RGB"), dtype=np.int16)
-            ia = np.array(Image.open(i_path).convert("RGB"), dtype=np.int16)
-            d = np.abs(na - ia)
-            _dbg(
-                "E",
-                "visibility_experiment.py:_ensure_pair",
-                "png pixel diff",
-                {
-                    "normal": trial.normal_name,
-                    "inv": trial.inv_name,
-                    "max_abs": int(d.max()),
-                    "mean_abs": float(d.mean()),
-                    "normal_tex": int(self.tex_cache[trial.normal_name]),
-                    "inv_tex": int(self.tex_cache[trial.inv_name]),
-                },
-            )
-        except Exception as e:
-            _dbg(
-                "E",
-                "visibility_experiment.py:_ensure_pair",
-                "png diff failed",
-                {"error": str(e)},
-            )
-        # #endregion
         return self.tex_cache[trial.normal_name], self.tex_cache[trial.inv_name]
 
     def _set_hud(self, **kwargs) -> None:
@@ -863,19 +794,6 @@ class ExperimentApp:
     def _present_texture(self, tex: int) -> None:
         """present_session-style: one texture, no HUD, one swap = one display frame."""
         draw_fullscreen(tex)
-        # #region agent log
-        if getattr(self, "_dbg_bind_left", 0) > 0:
-            self._dbg_bind_left -= 1
-            from OpenGL.GL import glGetError
-
-            err = int(glGetError())
-            _dbg(
-                "D",
-                "visibility_experiment.py:_present_texture",
-                "after draw",
-                {"tex": int(tex), "glError": err},
-            )
-        # #endregion
         glfw.swap_buffers(self.window)
         glfw.poll_events()
 
@@ -893,35 +811,7 @@ class ExperimentApp:
         """
         hold = max(1, int(hold))
         measure_n = min(60, n_frames) if measure_fps and not self._fps_logged else 0
-        t0 = time.perf_counter() if measure_n else time.perf_counter()
-        # #region agent log
-        first_choices: list[dict] = []
-        is_pair = isinstance(tex_or_pair, tuple)
-        if is_pair:
-            n_id, i_id = int(tex_or_pair[0]), int(tex_or_pair[1])
-            _dbg(
-                "A",
-                "visibility_experiment.py:_present_frames",
-                "pair ids",
-                {
-                    "normal_tex": n_id,
-                    "inv_tex": i_id,
-                    "same_id": n_id == i_id,
-                    "n_frames": n_frames,
-                    "hold": hold,
-                    "flicker_hz": (self.monitor_hz / (2.0 * hold)) if hold else None,
-                    "type_name": type(tex_or_pair).__name__,
-                },
-            )
-        else:
-            _dbg(
-                "C",
-                "visibility_experiment.py:_present_frames",
-                "not a pair",
-                {"tex": int(tex_or_pair), "n_frames": n_frames, "hold": hold},
-            )
-        self._dbg_bind_left = 4
-        # #endregion
+        t0 = time.perf_counter()
         for f in range(n_frames):
             if glfw.window_should_close(self.window) or self.abort_requested:
                 return False
@@ -930,61 +820,18 @@ class ExperimentApp:
                 tex = inv_tex if ((f // hold) & 1) else normal_tex
             else:
                 tex = tex_or_pair
-            # #region agent log
-            if f < 12:
-                use_inv = is_pair and ((f // hold) & 1)
-                first_choices.append(
-                    {
-                        "f": f,
-                        "tex": int(tex),
-                        "branch": (
-                            "inv" if use_inv else ("normal" if is_pair else "single")
-                        ),
-                    }
-                )
-            # #endregion
             self._present_texture(tex)
             if measure_n and f + 1 == measure_n:
                 elapsed = time.perf_counter() - t0
                 if elapsed > 0:
                     hz = measure_n / elapsed
                     print(f"[INFO] present ~{hz:.1f} Hz (target {TARGET_HZ})")
-                    # #region agent log
-                    _dbg(
-                        "B",
-                        "visibility_experiment.py:_present_frames",
-                        "measured present hz",
-                        {
-                            "hz": hz,
-                            "elapsed_s": elapsed,
-                            "measure_n": measure_n,
-                            "monitor_hz": self.monitor_hz,
-                            "swap_interval": 1,
-                            "hold_frames": self.hold_frames,
-                            "present_hz": self.monitor_hz,
-                            "flicker_hz": self.flicker_hz,
-                        },
-                    )
-                    # #endregion
                     if abs(hz - TARGET_HZ) > 3.0:
                         print(
                             f"[WARN] Measured present rate far from {TARGET_HZ} Hz. "
                             "Check OS refresh / exclusive fullscreen / vsync."
                         )
                     self._fps_logged = True
-        # #region agent log
-        _dbg(
-            "C",
-            "visibility_experiment.py:_present_frames",
-            "stim finished",
-            {
-                "first_choices": first_choices,
-                "total_frames": n_frames,
-                "wall_s": time.perf_counter() - t0,
-                "unique_tex_in_first8": sorted({c["tex"] for c in first_choices}),
-            },
-        )
-        # #endregion
         return True
 
     # ---- lifecycle ----
@@ -1058,24 +905,6 @@ class ExperimentApp:
             f"stim={frames_for_seconds(STIM_SEC, self.monitor_hz)} "
             f"(@ {self.monitor_hz:.1f} Hz vsync, hold={self.hold_frames})"
         )
-        # #region agent log
-        print(f"[DEBUG] log -> {_DEBUG_LOG}")
-        _dbg(
-            "B",
-            "visibility_experiment.py:init_gl",
-            "gl init",
-            {
-                "width": self.width,
-                "height": self.height,
-                "monitor_hz": self.monitor_hz,
-                "window_mode": self.window_mode,
-                "swap_interval": 1,
-                "hold_frames": self.hold_frames,
-                "flicker_hz": self.flicker_hz,
-                "present_hz": self.monitor_hz,
-            },
-        )
-        # #endregion
 
     def shutdown(self) -> None:
         for tex in list(self.tex_cache.values()):
@@ -1128,7 +957,7 @@ class ExperimentApp:
                 return
 
             for trial in self.main_trials:
-                progress = f"{trial.trial_index}/48"
+                progress = f"{trial.trial_index}/{N_MAIN}"
                 ok = self._run_trial(trial, progress=progress)
                 if not ok:
                     self._abort_session()
@@ -1166,7 +995,7 @@ class ExperimentApp:
             "3. ちらつきが分かる",
             "4. QRコードのようなものが見える",
             "",
-            "最初に練習が 1 回あり、そのあと本番（48試行）に入ります。",
+            f"最初に練習が 1 回あり、そのあと本番（{N_MAIN}試行）に入ります。",
             "各試行は灰色 → 刺激3秒 → 画面が切り替わってから 1〜4 で回答。",
             "視聴距離は実験者の指示どおりに固定してください。",
             "右上「中断」または Esc で中断できます。",
@@ -1192,7 +1021,7 @@ class ExperimentApp:
     def _show_main_ready(self) -> bool:
         title = "本番を始めます"
         body = [
-            "練習は終わりです。ここからが本番です（48試行）。",
+            f"練習は終わりです。ここからが本番です（{N_MAIN}試行）。",
             "",
             "やり方は練習と同じです。",
             "灰色 → 刺激3秒 → 画面が切り替わってから 1〜4 で回答。",
