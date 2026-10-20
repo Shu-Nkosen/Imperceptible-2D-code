@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 FAMILY_JP = {
-    "pair": "2フレーム差分",
-    "accum": "5フレーム積算",
+    "pair": "1ペア（差分）",
+    "accum": "4ペア積算",
     "lockin": "同期検波",
     "fourier": "時間FFT",
     "stat_std": "時間標準偏差",
@@ -19,8 +19,8 @@ METRIC_ANY_SUCCESS_COUNT = METRIC_DECODE_COUNT
 LABEL_BINARY = "二値化"
 LABEL_GRAY = "濃淡"
 LABEL_INTENSITY = "色の変化強度"
-LABEL_RATE = "表示レート"
-LABEL_EXPOSURE = "露光"
+LABEL_RATE = "表示の切り替え速さ"
+LABEL_EXPOSURE = "スマートフォンカメラの露光時間"
 LABEL_FLUORO_OFF = "蛍光灯なし"
 LABEL_FLUORO_ON = "蛍光灯あり"
 LABEL_FLUORO_COMPARE = "蛍光灯の有無別 復号可能条件"
@@ -28,7 +28,7 @@ LABEL_FAMILY = "手法"
 
 TALK_FAMILIES = ["pair", "accum", "lockin", "fourier"]
 
-# 発表の accum は window_n=5（binary+gray）のみ
+# 発表の accum は window_n=5（5フレーム窓＝隣接差4本。binary+gray）のみ
 ACCUM_TALK_WINDOW_N = 5
 
 CHANNEL_JP = {
@@ -41,9 +41,31 @@ CHANNEL_JP = {
     "max": "max",
 }
 
+IMAGE_LABEL = {
+    "ex": "Experiment",
+    "rice": "Nature",
+    "hocho": "Construction",
+    "nagaoka_fireworks": "Fireworks",
+}
+IMAGE_JP = IMAGE_LABEL
+IMAGE_THEME = {
+    "ex": "#2f6fed",
+    "hocho": "#c62828",
+    "nagaoka_fireworks": "#212121",
+    "rice": "#2e7d32",
+}
+
 
 def jp_family(name: str) -> str:
     return FAMILY_JP.get(name, name)
+
+
+def jp_image(name: str) -> str:
+    return IMAGE_LABEL.get(name, name)
+
+
+def embed_channel_title(name: str) -> str:
+    return f"埋め込みチャネル（{jp_image(name)}）"
 
 
 def jp_channel(name: str) -> str:

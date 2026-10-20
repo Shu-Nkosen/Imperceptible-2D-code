@@ -24,12 +24,7 @@ from analyze_image_channel import (  # noqa: E402
     load_prepared,
 )
 
-IMAGE_JP = {
-    "ex": "実験",
-    "rice": "自然",
-    "hocho": "工事",
-    "nagaoka_fireworks": "花火",
-}
+from family_labels import IMAGE_JP
 CHANNELS = ("R", "G", "B", "gray")
 CH_COLOR = {"R": "#E31A1C", "G": "#1B8A3A", "B": "#1F5AA6", "gray": "#555555"}
 

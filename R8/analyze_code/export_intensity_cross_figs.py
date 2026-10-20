@@ -25,6 +25,8 @@ OUT = ROOT / "summary_slides"
 
 from family_labels import (
     FAMILY_JP,
+    IMAGE_JP,
+    IMAGE_THEME,
     LABEL_BINARY,
     LABEL_GRAY,
     LABEL_INTENSITY,
@@ -35,12 +37,20 @@ from family_labels import (
     jp_channel,
     jp_channels,
     jp_family,
+    jp_image,
     jp_intensity,
     jp_rate_legend,
     rate_of,
 )
 from count_chart import (
+    CH,
+    EXP,
+    FL,
+    HZ,
+    IMG,
+    INTEN,
     METRIC_YLABEL,
+    denom,
     heatmap_cell_text,
     title_scope,
     title_scope_text,
@@ -68,18 +78,6 @@ C = {
     "fourier": "#e76f51",
 }
 IMAGE_ORDER = ["ex", "hocho", "nagaoka_fireworks", "rice"]
-IMAGE_JP = {
-    "ex": "実験",
-    "hocho": "工事",
-    "nagaoka_fireworks": "花火",
-    "rice": "自然",
-}
-IMAGE_THEME = {
-    "ex": "#2f6fed",
-    "hocho": "#c62828",
-    "nagaoka_fireworks": "#212121",
-    "rice": "#2e7d32",
-}
 CHANNELS = ["R", "G", "B", "I", "X"]
 INTENSITIES = ["4", "8", "12"]
 FREQ_RATES = [45, 60, 90]
@@ -89,10 +87,6 @@ FREQ_PASSES = {
     "fourier": ["fourier", "fourier_num"],
 }
 FREQ_NOMINALS = [7.5, 10.0, 11.25, 15.0, 22.5, 26.25, 30.0]
-
-
-def jp_image(name: str) -> str:
-    return IMAGE_JP.get(name, name)
 
 
 def bin_target_hz(hz: float, tol: float = 0.6) -> float:
@@ -265,7 +259,7 @@ def main() -> None:
     family_rows = load_family_rows()
     n_cond = len(family_rows["pair"])
     n_intensity = n_cond // 3
-    n_image_channel_cell = n_intensity // 20  # 画像4×色5、強度固定
+    n_image_channel_cell = n_intensity // 20  # 画像4×チャネル5、強度固定
     # --- CSV: intensity × factor breakdown ---
     csv_rows: list[dict] = []
     for fam in FAMILIES:
@@ -326,7 +320,7 @@ def main() -> None:
     ax.set_xticks(x)
     ax.set_xticklabels([jp_intensity(t) for t in INTENSITIES])
     ax.set_ylabel(METRIC_YLABEL)
-    ax.set_title(title_scope("色の変化強度 × 手法", n_intensity))
+    ax.set_title(title_scope("色の変化強度", img=IMG, ch=CH, hz=HZ, exp=EXP, fl=FL))
     _, y_hi = ylim_for_counts(all_09)
     ax.set_ylim(0, y_hi)
     ax.legend(ncol=3, fontsize=8)
@@ -358,7 +352,7 @@ def main() -> None:
     for ax in axes.ravel():
         ax.set_ylim(0, y_hi)
     axes[0, 0].legend(fontsize=7, ncol=2)
-    fig.suptitle(title_scope_text("色の変化強度 × 表示レート", f"各{n_intensity}条件中"), y=1.01)
+    fig.suptitle(title_scope("色の変化強度 × 表示レート", img=IMG, ch=CH, exp=EXP, fl=FL), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "10_intensity_by_rate.png")
     plt.close(fig)
@@ -388,7 +382,7 @@ def main() -> None:
     for ax in axes.ravel():
         ax.set_ylim(0, y_hi)
     axes[0, 0].legend(fontsize=8)
-    fig.suptitle(title_scope_text("色の変化強度 × 露光時間", f"各{n_intensity}条件中"), y=1.01)
+    fig.suptitle(title_scope("色の変化強度 × 露光時間", img=IMG, ch=CH, hz=HZ, fl=FL), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "11_intensity_by_exposure.png")
     plt.close(fig)
@@ -417,7 +411,7 @@ def main() -> None:
     for ax in axes.ravel():
         ax.set_ylim(0, y_hi)
     axes[0, 0].legend(fontsize=8, ncol=2)
-    fig.suptitle(title_scope_text("色の変化強度 × チャネル", f"各{n_intensity}条件中"), y=1.01)
+    fig.suptitle(title_scope("色の変化強度 × チャネル", img=IMG, hz=HZ, exp=EXP, fl=FL), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "12_intensity_by_channel.png")
     plt.close(fig)
@@ -453,7 +447,7 @@ def main() -> None:
     for ax in axes.ravel():
         ax.set_ylim(0, y_hi)
     axes[0, 0].legend(ncol=3, fontsize=7)
-    fig.suptitle("色の変化強度 × 手法（画像別）", y=1.01)
+    fig.suptitle(title_scope("色の変化強度 × 手法（画像別）", ch=CH, hz=HZ, exp=EXP, fl=FL), y=1.01)
     fig.tight_layout()
     fig.savefig(OUT / "13_intensity_by_family.png")
     plt.close(fig)
@@ -520,7 +514,7 @@ def main() -> None:
             if ri == 0:
                 ax.set_title(jp_intensity(inten), fontsize=11)
     fig.colorbar(last_im, ax=axes.ravel().tolist(), shrink=0.55, label=METRIC_YLABEL)
-    fig.suptitle(title_scope_text("画像×チャネル（色の変化強度別）", f"各セル{n_image_channel_cell}条件中"), fontsize=13)
+    fig.suptitle(title_scope("画像×チャネル（色の変化強度別）", hz=HZ, exp=EXP, fl=FL), fontsize=13)
     fig.savefig(OUT / "14_intensity_heatmap.png")
     plt.close(fig)
     for old in OUT.glob("14_intensity_heatmap_*.png"):
@@ -579,8 +573,7 @@ def main() -> None:
             )
         ax.set_xticks(x)
         ax.set_xticklabels([f"{format_hz_label(h)}" for h in freqs], fontsize=fs_tick)
-        n_rate_panel = n_cond // 5
-        ax.set_title(title_scope(f"表示 {rate} Hz", n_rate_panel), fontsize=fs_title)
+        ax.set_title(title_scope(f"表示 {rate} Hz", img=IMG, ch=CH, inten=INTEN, exp=EXP, fl=FL), fontsize=fs_title)
         ax.set_xlabel("狙う周波数 [Hz]", fontsize=fs_label)
         ax.set_ylim(freq_ylim)
         ax.tick_params(labelsize=fs_tick)
@@ -588,10 +581,7 @@ def main() -> None:
     axes[0].set_ylabel(METRIC_YLABEL, fontsize=fs_label)
     axes[0].legend(frameon=False, loc="upper left", fontsize=fs_leg)
     fig.suptitle(
-        title_scope_text(
-            f"{jp_family('lockin')}・{jp_family('fourier')}：狙う周波数別",
-            f"全{n_cond}条件",
-        ),
+        title_scope(f"{jp_family('lockin')}・{jp_family('fourier')}：狙う周波数別", img=IMG, ch=CH, inten=INTEN, hz=HZ, exp=EXP, fl=FL),
         fontsize=16,
     )
     fig.tight_layout()

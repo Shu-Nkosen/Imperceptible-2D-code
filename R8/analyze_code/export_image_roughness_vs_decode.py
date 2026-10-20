@@ -12,6 +12,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from family_labels import IMAGE_LABEL
+from count_chart import CH, EXP, FL, HZ4590, INTEN, title_scope
+
 plt.rcParams["font.family"] = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
@@ -19,9 +22,9 @@ HERE = Path(__file__).resolve().parent
 STUDY = HERE / "out_image_channel_study"
 KEEP = {45, 60, 90}
 FAMS = ("pair", "accum", "lockin", "fourier")
-# 表の並び: 実験・自然・工事・花火
+# 表の並び: Experiment / Nature / Construction / Fireworks
 IMAGE_ORDER = ("ex", "rice", "hocho", "nagaoka_fireworks")
-IMAGE_JP = {"ex": "実験", "rice": "自然", "hocho": "工事", "nagaoka_fireworks": "花火"}
+IMAGE_JP = IMAGE_LABEL
 FAM_JP = {"pair": "差分", "accum": "積算", "lockin": "同期検波", "fourier": "FFT"}
 FAM_COLOR = {
     "pair": "#457b9d",
@@ -174,14 +177,14 @@ def main() -> None:
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels)
     axes[1].set_ylabel("復号可能条件（枚数）")
-    axes[1].set_title("45/60/90 手法別（各 n=270）")
+    axes[1].set_title(title_scope("45/60/90 手法別", ch=CH, inten=INTEN, hz=HZ4590, exp=EXP, fl=FL))
     _, y_hi = (0, max(max(r[f"{fam}_ok"] for r in out_rows) for fam in FAMS) * 1.15 + 5)
     axes[1].set_ylim(0, y_hi)
     axes[1].set_axisbelow(True)
     axes[1].grid(axis="y", alpha=0.3)
     axes[1].legend(fontsize=8, ncol=2, loc="upper right")
 
-    fig.suptitle("画像単位の荒さ vs 復号 — 工事は花火より少し滑らかでも同期検波は高い", fontsize=12)
+    fig.suptitle("画像単位の荒さ vs 復号 — Construction は Fireworks より少し滑らかでも同期検波は高い", fontsize=12)
     fig.tight_layout()
     fig_path = STUDY / "bar_image_roughness_vs_decode.png"
     fig.savefig(fig_path, dpi=150)

@@ -11,6 +11,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from family_labels import IMAGE_LABEL
+from count_chart import EXP, FL, HZ4590, INTEN, title_scope
+
 plt.rcParams["font.family"] = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
@@ -18,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 STUDY = HERE / "out_image_channel_study"
 KEEP = {45, 60, 90}
 FAMS = ("pair", "accum", "lockin", "fourier")
-IMAGE_JP = {"ex": "実験", "rice": "自然", "hocho": "工事", "nagaoka_fireworks": "花火"}
+IMAGE_JP = IMAGE_LABEL
 FAM_JP = {"pair": "差分", "accum": "積算", "lockin": "同期検波", "fourier": "FFT"}
 CH_COLOR = {"R": "#E31A1C", "G": "#1B8A3A", "B": "#1F5AA6"}
 MARK = {"ex": "o", "rice": "s", "hocho": "^", "nagaoka_fireworks": "D"}
@@ -127,7 +130,7 @@ def main() -> None:
             )
             if r["image"] == "rice" and r["channel"] == "B":
                 ax.annotate(
-                    "自然B",
+                    "Nature B",
                     (r[xkey], r["lockin_pct"]),
                     textcoords="offset points",
                     xytext=(8, 8),
@@ -136,7 +139,7 @@ def main() -> None:
                 )
             if r["image"] == "hocho" and r["channel"] == "B":
                 ax.annotate(
-                    "工事B",
+                    "Construction B",
                     (r[xkey], r["lockin_pct"]),
                     textcoords="offset points",
                     xytext=(8, -12),
@@ -144,7 +147,7 @@ def main() -> None:
                     color=CH_COLOR["B"],
                 )
         ax.set_xlabel(xlabel)
-        ax.set_title("同期検波 復号可能条件（45/60/90、各 n=54）")
+        ax.set_title(title_scope("同期検波 復号可能条件", inten=INTEN, hz=HZ4590, exp=EXP, fl=FL))
     axes[0].set_ylabel("同期検波 復号可能条件（枚数）")
     from matplotlib.lines import Line2D
 
@@ -154,7 +157,7 @@ def main() -> None:
         for k in IMAGE_JP
     ]
     axes[1].legend(handles=ch_h + im_h, loc="upper right", fontsize=8, ncol=2)
-    fig.suptitle("分散と埋め込みチャネルの復号 — 自然Bは画素分散が大きくても読めない", fontsize=12)
+    fig.suptitle("分散と埋め込みチャネルの復号 — Nature B は画素分散が大きくても読めない", fontsize=12)
     fig.tight_layout()
     fig_path = STUDY / "scatter_var_vs_lockin.png"
     fig.savefig(fig_path, dpi=150)

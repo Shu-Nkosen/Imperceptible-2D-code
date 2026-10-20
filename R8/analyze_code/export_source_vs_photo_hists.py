@@ -20,29 +20,15 @@ plt.rcParams["axes.grid"] = True
 plt.rcParams["grid.alpha"] = 0.25
 plt.rcParams["axes.axisbelow"] = True
 
+from family_labels import IMAGE_THEME, jp_image
+
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "out_mid_fast_0805" / "summary_slides"
 SRC_DIR = ROOT.parent / "make_movie"
 PIC_DIR = OUT / "pic"
 
 IMAGE_ORDER = ["ex", "hocho", "nagaoka_fireworks", "rice"]
-IMAGE_JP = {
-    "ex": "実験",
-    "hocho": "工事",
-    "nagaoka_fireworks": "花火",
-    "rice": "自然",
-}
-IMAGE_THEME = {
-    "ex": "#2f6fed",
-    "hocho": "#c62828",
-    "nagaoka_fireworks": "#212121",
-    "rice": "#2e7d32",
-}
 CH_COLORS = {"R": "#d62828", "G": "#2a9d8f", "B": "#1d3557"}
-
-
-def jp_image(name: str) -> str:
-    return IMAGE_JP.get(name, name)
 
 
 def find_photo(name: str) -> Path | None:
