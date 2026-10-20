@@ -1,0 +1,17 @@
+{
+  "files.exclude": {
+    "make_movie": true,
+    "make_movie/**": true
+  },
+  "files.watcherExclude": {
+    "**/make_movie/**": true
+  },
+  "search.exclude": {
+    "make_movie": true,
+    "make_movie/**": true
+  },
+  "python.analysis.exclude": [
+    "make_movie",
+    "make_movie/**"
+  ]
+}

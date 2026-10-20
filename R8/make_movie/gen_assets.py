@@ -111,6 +111,29 @@ def center_square_params(width: int, height: int) -> tuple[int, int, int]:
     return x0, 0, square
 
 
+def draw_focus_grid(
+    img: np.ndarray,
+    color_bgr: tuple[int, int, int],
+    spacing: int = 80,
+    thickness: int = 1,
+    center_cross: bool = True,
+) -> None:
+    """ピント合わせ用の細い格子を in-place 描画（色平均への影響を抑える疎な線）。"""
+    h, w = img.shape[:2]
+    spacing = max(8, int(spacing))
+    thickness = max(1, int(thickness))
+    color = tuple(int(c) for c in color_bgr)
+    for x in range(0, w, spacing):
+        cv2.line(img, (x, 0), (x, h - 1), color, thickness, lineType=cv2.LINE_8)
+    for y in range(0, h, spacing):
+        cv2.line(img, (0, y), (w - 1, y), color, thickness, lineType=cv2.LINE_8)
+    if center_cross:
+        cx, cy = w // 2, h // 2
+        arm = max(spacing * 2, 160)
+        cv2.line(img, (cx - arm, cy), (cx + arm, cy), color, thickness, lineType=cv2.LINE_8)
+        cv2.line(img, (cx, cy - arm), (cx, cy + arm), color, thickness, lineType=cv2.LINE_8)
+
+
 def preclip(img: np.ndarray, margin: int) -> np.ndarray:
     if margin <= 0:
         return img
@@ -202,12 +225,35 @@ def main() -> None:
                 cv2.imwrite(str(args.out_dir / inv_name), inv.astype(np.uint8))
                 generated += 1
 
-    # slate assets (optional but useful to keep as files)
+    # slate assets: solid + sparse focus grid (phone AF aid; low impact on sync color means)
+    focus_spacing = 80
     slate_black = np.zeros((args.height, args.width, 3), dtype=np.uint8)
+    draw_focus_grid(slate_black, color_bgr=(40, 40, 40), spacing=focus_spacing, thickness=1)
     slate_red = np.zeros((args.height, args.width, 3), dtype=np.uint8)
     slate_red[:, :, 2] = 255
+    draw_focus_grid(slate_red, color_bgr=(0, 0, 0), spacing=focus_spacing, thickness=1)
     cv2.imwrite(str(args.out_dir / "slate_black.png"), slate_black)
     cv2.imwrite(str(args.out_dir / "slate_red.png"), slate_red)
+    print(
+        f"[OK] wrote slate_black.png / slate_red.png "
+        f"(focus grid spacing={focus_spacing}px, black_lines=gray40, red_lines=black)"
+    )
+
+    # GT QR display: same center-square placement as embedded conditions (white bg).
+    # present_session prefers this over stretching raw HP_QR.png to full screen.
+    qr_gray = cv2.imread(str(args.qr_path), cv2.IMREAD_GRAYSCALE)
+    if qr_gray is None:
+        print(f"[WARN] could not write gt_qr_display.png (missing {args.qr_path.name})")
+    else:
+        qr_sq = cv2.resize(qr_gray, (square, square), interpolation=cv2.INTER_NEAREST)
+        _, qr_bin = cv2.threshold(qr_sq, 127, 255, cv2.THRESH_BINARY)
+        gt_display = np.full((args.height, args.width, 3), 255, dtype=np.uint8)
+        gt_display[:, x0 : x0 + square, 0] = qr_bin
+        gt_display[:, x0 : x0 + square, 1] = qr_bin
+        gt_display[:, x0 : x0 + square, 2] = qr_bin
+        gt_path = args.out_dir / "gt_qr_display.png"
+        cv2.imwrite(str(gt_path), gt_display)
+        print(f"[OK] wrote {gt_path.name} (center square={square}, x0={x0})")
 
     print(f"[OK] generated={generated} (+ slates) out_dir={args.out_dir}")
 

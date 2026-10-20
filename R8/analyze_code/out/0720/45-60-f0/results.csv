@@ -1,0 +1,22 @@
+﻿folder,decode_note,decode_variant,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold,pixel_acc_all,pixel_acc_ok,pixel_acc_best,best_pair_frame_1,best_pair_frame_2,video,display_rate,exposure,fluorescent,camera_fps,cond,image,channel,token,intensity,decode_decoded_text,decode_method,decode_frame_1,decode_frame_2,note,analysis_frames,extract_sec
+rice_R_4,QR未検出,,accum,5,,,12,0.779858,,0.844648,frame_00025.png,frame_00029.png,r45_e60_f0.mp4,45 Hz,1/60,蛍光灯なし,58.592 fps,0,rice,R,R,4,,,frame_00110.png,frame_00114.png,,117,1.996868
+rice_R_8,,zxing_gray,accum,5,,,16,0.922702,0.923755,0.928101,frame_00065.png,frame_00069.png,,,,,,1,rice,R,R,8,https://www.nagaoka-ct.ac.jp,zxing_gray_x1.0_k5_i1,frame_00000.png,frame_00004.png,,117,1.996868
+rice_R_12,,zxing_gray,accum,5,,,32,0.962917,0.962917,0.966490,frame_00025.png,frame_00029.png,,,,,,2,rice,R,R,12,https://www.nagaoka-ct.ac.jp,zxing_gray_x1.0_k5_i1,frame_00000.png,frame_00004.png,,117,1.996868
+nagaoka_fireworks_R_4,QR未検出,,accum,5,,,12,0.717144,,0.731922,frame_00005.png,frame_00009.png,,,,,,3,nagaoka_fireworks,R,R,4,,,frame_00105.png,frame_00109.png,,117,1.996868
+nagaoka_fireworks_R_8,QR未検出,,accum,5,,,16,0.808451,,0.812747,frame_00075.png,frame_00079.png,,,,,,4,nagaoka_fireworks,R,R,8,,,frame_00105.png,frame_00109.png,,117,1.996868
+nagaoka_fireworks_R_12,QR未検出,,accum,5,,,24,0.877305,,0.888075,frame_00040.png,frame_00044.png,,,,,,5,nagaoka_fireworks,R,R,12,,,frame_00110.png,frame_00114.png,,117,1.996868
+hocho_R_4,QR未検出,,accum,5,,,12,0.699372,,0.710655,frame_00030.png,frame_00034.png,,,,,,6,hocho,R,R,4,,,frame_00110.png,frame_00114.png,,117,1.996868
+hocho_R_8,QR未検出,,accum,5,,,12,0.810623,,0.818503,frame_00080.png,frame_00084.png,,,,,,7,hocho,R,R,8,,,frame_00095.png,frame_00099.png,,117,1.996868
+hocho_R_12,QR未検出,,accum,5,,,24,0.856640,,0.861025,frame_00075.png,frame_00079.png,,,,,,8,hocho,R,R,12,,,frame_00085.png,frame_00089.png,,117,1.996868
+ex_R_4,QR未検出,,accum,5,,,12,0.817282,,0.829909,frame_00050.png,frame_00054.png,,,,,,9,ex,R,R,4,,,frame_00110.png,frame_00114.png,,117,1.996868
+ex_R_8,QR未検出,,accum,5,,,24,0.897056,,0.900155,frame_00055.png,frame_00059.png,,,,,,10,ex,R,R,8,,,frame_00110.png,frame_00114.png,,117,1.996868
+ex_R_12,QR未検出,,accum,5,,,32,0.922367,,0.927138,frame_00035.png,frame_00039.png,,,,,,11,ex,R,R,12,,,frame_00110.png,frame_00114.png,,117,1.996868
+rice_G_4,QR未検出,,accum,5,,,12,0.773159,,0.793710,frame_00035.png,frame_00039.png,,,,,,12,rice,G,G,4,,,frame_00095.png,frame_00099.png,,117,1.996868
+rice_G_8,,zxing_gray,accum,5,,,16,0.915838,0.918124,0.923172,frame_00075.png,frame_00079.png,,,,,,13,rice,G,G,8,https://www.nagaoka-ct.ac.jp,zxing_gray_x1.0_k5_i1,frame_00010.png,frame_00014.png,,117,1.996868
+rice_G_12,,zxing_gray,accum,5,,,32,0.965045,0.965045,0.969027,frame_00015.png,frame_00019.png,,,,,,14,rice,G,G,12,https://www.nagaoka-ct.ac.jp,zxing_gray_x1.0_k5_i1,frame_00000.png,frame_00004.png,,117,1.996868
+nagaoka_fireworks_G_4,QR未検出,,accum,5,,,12,0.722104,,0.735058,frame_00010.png,frame_00014.png,,,,,,15,nagaoka_fireworks,G,G,4,,,frame_00090.png,frame_00094.png,,117,1.996868
+nagaoka_fireworks_G_8,QR未検出,,accum,5,,,16,0.803426,,0.813478,frame_00090.png,frame_00094.png,,,,,,16,nagaoka_fireworks,G,G,8,,,frame_00100.png,frame_00104.png,,117,1.996868
+nagaoka_fireworks_G_12,QR未検出,,accum,5,,,32,0.880501,,0.891121,frame_00080.png,frame_00084.png,,,,,,17,nagaoka_fireworks,G,G,12,,,frame_00105.png,frame_00109.png,,117,1.996868
+hocho_G_4,QR未検出,,accum,5,,,12,0.675833,,0.684725,frame_00035.png,frame_00039.png,,,,,,18,hocho,G,G,4,,,frame_00100.png,frame_00104.png,,117,1.996868
+hocho_G_8,QR未検出,,accum,5,,,12,0.748344,,0.761163,frame_00065.png,frame_00069.png,,,,,,19,hocho,G,G,8,,,frame_00110.png,frame_00114.png,,117,1.996868
+hocho_G_12,QR未検出,,accum,5,,,16,0.876618,,0.890124,frame_00070.png,frame_00074.png,,,,,,20,hocho,G,G,12,,,frame_00110.png,frame_00114.png,,117,1.996868

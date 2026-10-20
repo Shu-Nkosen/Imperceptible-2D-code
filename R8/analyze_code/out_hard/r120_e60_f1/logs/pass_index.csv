@@ -1,0 +1,12 @@
+﻿pass,status,elapsed_sec,log_path,results_csv,decode_csv,phone_copied,note
+pair,OK,36744.3,logs\pass_hully_hard.log,results_pair.csv,qr_decode_all_frames_pair.csv,150,
+accum,OK,36744.3,logs\pass_hully_hard.log,results_accum.csv,qr_decode_all_frames_accum.csv,83,
+stat_std,OK,36744.3,logs\pass_hully_hard.log,results_stat_std.csv,qr_decode_all_frames_stat_std.csv,1,
+stat_var,OK,36744.3,logs\pass_hully_hard.log,results_stat_var.csv,qr_decode_all_frames_stat_var.csv,1,
+lockin,OK,36744.3,logs\pass_hully_hard.log,results_lockin.csv,qr_decode_all_frames_lockin.csv,0,
+fourier,OK,36744.3,logs\pass_hully_hard.log,results_fourier.csv,qr_decode_all_frames_fourier.csv,6,
+accum_num,OK,36744.3,logs\pass_hully_hard.log,results_accum_num.csv,qr_decode_all_frames_accum_num.csv,0,
+stat_std_num,OK,36744.3,logs\pass_hully_hard.log,results_stat_std_num.csv,qr_decode_all_frames_stat_std_num.csv,1,
+stat_var_num,OK,36744.3,logs\pass_hully_hard.log,results_stat_var_num.csv,qr_decode_all_frames_stat_var_num.csv,1,
+lockin_num,OK,36744.3,logs\pass_hully_hard.log,results_lockin_num.csv,qr_decode_all_frames_lockin_num.csv,0,
+fourier_num,OK,36744.3,logs\pass_hully_hard.log,results_fourier_num.csv,qr_decode_all_frames_fourier_num.csv,0,

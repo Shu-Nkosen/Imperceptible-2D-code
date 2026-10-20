@@ -1,0 +1,11 @@
+{
+  "folders": [
+    {
+      "name": "R8",
+      "path": "R8"
+    }
+  ],
+  "settings": {
+    "git.openRepositoryInParentFolders": "always"
+  }
+}

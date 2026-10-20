@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline_hully.py", line 958, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline_hully.py", line 558, in main
+    sync_frame, fps = detect_black_to_red_sync(video_path, cfg)
+                      ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\shu_kondo\project\Imperceptible-2D-code\R8\analyze_code\run_pipeline.py", line 233, in detect_black_to_red_sync
+    raise RuntimeError("SYNC detection failed (black->red not found). Try adjusting thresholds.")
+RuntimeError: SYNC detection failed (black->red not found). Try adjusting thresholds.
