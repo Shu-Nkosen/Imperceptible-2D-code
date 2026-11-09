@@ -1,8 +1,3 @@
 analyze_code/out_rgblab/**/**/*.png
-analyze_code/out_rgblab/**/**/*.npy
-analyze_code/out_rgblab/**/**/logs/
 analyze_code/out_rgblab/**/*.png
-analyze_code/out_rgblab/**/*.npy
-analyze_code/out_rgblab/**/logs/
 movie_rgblab/
-make_movie/manifests/
