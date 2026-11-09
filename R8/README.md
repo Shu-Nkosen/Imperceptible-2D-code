@@ -21,6 +21,12 @@
 python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 4,8,12 --channels R,G,B,max,min --clip-margin 12
 ```
 
+issue #32 の RGB/Lab 比較用（24条件）は、OpenCV 8bit Lab の各成分を0〜255スケールで扱い、RGBと同じ強度12（±12）で生成します。
+
+```bash
+python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 12 --channels R,G,B,LabL,LabA,LabB --clip-margin 12
+```
+
 生成される主なファイル（例）:
 
 - `rice_4_normalR.png` / `rice_4_invR.png`
@@ -69,6 +75,12 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 ```powershell
 .\present_session.exe --rate 60 --exp 250 --interval 3 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --qr-sec 3 --repeat 1 --out-manifest manifests\r60_e250.json
+```
+
+issue #32 の24条件（RGB + Lab、強度12）は `--profile rgb-lab` を指定します。GT用QRは条件0前・条件12前・条件24後に表示されます。
+
+```powershell
+.\present_session.exe --rate 60 --exp 250 --interval 3 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --qr-sec 3 --repeat 1 --profile rgb-lab --out-manifest manifests\r60_e250_rgblab.json
 ```
 
 例（120Hz・OSを120Hzにしてから）:
@@ -124,6 +136,12 @@ gcc present_session.c -I"..\..\vcpkg\installed\x64-mingw-dynamic\include" -L"..\
 
 ```bash
 python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manifest R8/make_movie/manifests/r180_e250.json --max-frames 120
+```
+
+24条件 manifest は条件数を自動認識するため、`--conditions` は不要です。
+
+```bash
+python R8/analyze_code/run_pipeline.py --video R8/movie/r60_e250_f1.mp4 --manifest R8/make_movie/manifests/r60_e250_rgblab.json --mid-search
 ```
 
 窓合算（accum）で解析:

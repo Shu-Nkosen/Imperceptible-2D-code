@@ -9,7 +9,7 @@ import cv2
 import numpy as np
 
 
-Channel = Literal["R", "G", "B", "max", "min"]
+Channel = Literal["R", "G", "B", "LabL", "LabA", "LabB", "max", "min"]
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,12 @@ def parse_args() -> Args:
     p = argparse.ArgumentParser(description="R8 make_movie assets generator (normal/inv per channel/intensity)")
     p.add_argument("--images", type=str, default="rice,nagaoka_fireworks,hocho,ex", help="base image names (no extension), comma-separated")
     p.add_argument("--intensities", type=str, default="4,8,12", help="intensities (e.g. 4,8,12)")
-    p.add_argument("--channels", type=str, default="R,G,B,max,min", help="channels: R,G,B,max,min")
+    p.add_argument(
+        "--channels",
+        type=str,
+        default="R,G,B,max,min",
+        help="channels: R,G,B,LabL,LabA,LabB,max,min",
+    )
     p.add_argument("--clip-margin", type=int, default=4, help="pre-clip margin applied to all pixels/channels")
     p.add_argument("--out-dir", type=str, default="", help="output directory (default: same folder as inputs)")
     p.add_argument("--qr", type=str, default="HP_QR.png", help="QR mask image path (relative to this script)")
@@ -69,10 +74,12 @@ def parse_args() -> Args:
         cu = c.upper()
         if cu in ("R", "G", "B"):
             parsed_channels.append(cu)  # type: ignore[arg-type]
+        elif cu in ("LABL", "LABA", "LABB"):
+            parsed_channels.append({"LABL": "LabL", "LABA": "LabA", "LABB": "LabB"}[cu])  # type: ignore[arg-type]
         elif c.lower() in ("max", "min"):
             parsed_channels.append(c.lower())  # type: ignore[arg-type]
         else:
-            raise SystemExit(f"unknown channel: {c} (allowed: R,G,B,max,min)")
+            raise SystemExit(f"unknown channel: {c} (allowed: R,G,B,LabL,LabA,LabB,max,min)")
 
     return Args(
         images=parse_list(ns.images),
@@ -159,6 +166,15 @@ def apply_channel_delta(
         out[:, x0 : x0 + square, :] = roi
         return out
 
+    if channel in ("LabL", "LabA", "LabB"):
+        lab = cv2.cvtColor(np.clip(roi, 0, 255).astype(np.uint8), cv2.COLOR_BGR2LAB)
+        lab_idx = {"LabL": 0, "LabA": 1, "LabB": 2}[channel]
+        plane = lab[:, :, lab_idx].astype(np.float32)
+        plane[black_mask] -= delta
+        lab[:, :, lab_idx] = np.clip(plane, 0, 255).astype(np.uint8)
+        out[:, x0 : x0 + square, :] = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype(np.float32)
+        return out
+
     # max/min mode: choose per-pixel channel index from current roi (preclipped)
     if channel == "max":
         idx = np.argmax(roi, axis=2)
@@ -177,7 +193,7 @@ def apply_channel_delta(
 
 
 def token_for_channel(channel: Channel) -> str:
-    if channel in ("R", "G", "B"):
+    if channel in ("R", "G", "B", "LabL", "LabA", "LabB"):
         return channel
     if channel == "max":
         return "X"

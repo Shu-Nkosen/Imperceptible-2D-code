@@ -37,6 +37,9 @@ CHANNEL_JP = {
     "B": "B",
     "I": "min",
     "X": "max",
+    "LabL": "LabL",
+    "LabA": "LabA",
+    "LabB": "LabB",
     "min": "min",
     "max": "max",
 }

@@ -16,6 +16,14 @@ python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --in
 
 `slate_black.png` / `slate_red.png`（同期用・ピント格子付き）と `gt_qr_display.png` もここで生成されます。表示前に再実行し、続けて `present_session.exe` を再ビルドしてください。
 
+### issue #32: RGB と Lab の24条件
+
+OpenCV 8bit Lab の `L/a/b` を0〜255スケールで扱い、RGBと同じ強度12（±12）で生成します。
+
+```powershell
+python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 12 --channels R,G,B,LabL,LabA,LabB --clip-margin 12
+```
+
 ### プレゼンターのビルド
 
 ```powershell

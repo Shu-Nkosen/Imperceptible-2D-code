@@ -47,7 +47,12 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="R8: sync(slate) detect -> split 60 conditions -> run analysis -> results.csv")
     p.add_argument("--video", type=str, required=True, help="input video path (e.g. r180_e250_f1.mp4)")
     p.add_argument("--out-dir", type=str, default="", help="output root dir (default: R8/analyze_code/out)")
-    p.add_argument("--conditions", type=int, default=60, help="number of blocks/conditions in a video")
+    p.add_argument(
+        "--conditions",
+        type=int,
+        default=None,
+        help="number of blocks/conditions (default: manifest count, otherwise 60)",
+    )
     p.add_argument("--block-sec", type=float, default=6.0, help="block duration seconds")
     p.add_argument("--use-start-sec", type=float, default=2.0, help="within-block start sec to extract")
     p.add_argument("--use-end-sec", type=float, default=4.0, help="within-block end sec to extract (exclusive)")
@@ -826,7 +831,19 @@ def condition_folder_name(cond: Dict[str, Any]) -> str:
     return f"{image}_{token}_{intensity}"
 
 
-def resolve_conditions(manifest: Dict[str, Any], n: int) -> List[Dict[str, Any]]:
+def resolve_condition_count(manifest: Dict[str, Any], requested: Optional[int]) -> int:
+    if requested is not None:
+        if int(requested) < 1:
+            raise SystemExit("--conditions は1以上である必要があります")
+        return int(requested)
+    items = manifest.get("conditions") if isinstance(manifest, dict) else None
+    if isinstance(items, list) and items:
+        return len(items)
+    return len(build_default_conditions())
+
+
+def resolve_conditions(manifest: Dict[str, Any], n: Optional[int] = None) -> List[Dict[str, Any]]:
+    n = resolve_condition_count(manifest, n)
     items = manifest.get("conditions") if isinstance(manifest, dict) else None
     if isinstance(items, list) and items:
         by_idx: Dict[int, Dict[str, Any]] = {}
@@ -891,7 +908,7 @@ def main() -> None:
     )
 
     # sync_frame = red onset. Content timeline includes GT QR slots interleaved with conditions.
-    conditions = resolve_conditions(manifest, int(ns.conditions))
+    conditions = resolve_conditions(manifest, ns.conditions)
     cond_starts_sec, gt_slots, qr_sec = resolve_gt_qr_timeline(
         manifest, slate_sec, padding_sec, block_sec, len(conditions)
     )

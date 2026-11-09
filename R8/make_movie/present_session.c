@@ -21,8 +21,8 @@
 
 typedef struct {
     int intensity;         // e.g. 4/8/12
-    const char* channel;   // "R","G","B","max","min"
-    const char* token;     // file suffix token: R/G/B/X/I
+    const char* channel;   // "R","G","B","LabL","LabA","LabB","max","min"
+    const char* token;     // file suffix token: R/G/B/LabL/LabA/LabB/X/I
     const char* base_name; // e.g. rice
 } Condition;
 
@@ -34,11 +34,15 @@ static const int INTENSITY_COUNT = 3;
 static const char* CHANNELS[] = { "R", "G", "B", "min", "max" };
 static const char* TOKENS[]   = { "R", "G", "B", "I",   "X"   };
 static const int CHANNEL_COUNT = 5;
+static const char* LAB_CHANNELS[] = { "R", "G", "B", "LabL", "LabA", "LabB" };
+static const int LAB_INTENSITIES[] = { 12 };
+static const int LAB_CHANNEL_COUNT = 6;
+static const int LAB_INTENSITY_COUNT = 1;
 
 static void usage(void) {
-    printf("Usage: present_session.exe --rate <Hz> --exp <250|125|60> --interval <n> --out-manifest <path.json> [--block-sec 6] [--slate-sec 0.5] [--padding-sec 5] [--qr-sec 3] [--repeat 1]\\n");
+    printf("Usage: present_session.exe --rate <Hz> --exp <250|125|60> --interval <n> --out-manifest <path.json> [--profile rgb-lab] [--block-sec 6] [--slate-sec 0.5] [--padding-sec 5] [--qr-sec 3] [--repeat 1]\\n");
     printf("Note: set OS display refresh to target rate before running (esp. 120Hz).\\n");
-    printf("GT QR (HP_QR.png) is shown before cond0, before cond30, and after cond59.\\n");
+    printf("GT QR (HP_QR.png) is shown before cond0, before the middle condition, and after the last condition.\\n");
 }
 
 static int parse_int_arg(int argc, char** argv, const char* key, int default_value) {
@@ -67,6 +71,10 @@ static int has_flag(int argc, char** argv, const char* key) {
         if (strcmp(argv[i], key) == 0) return 1;
     }
     return 0;
+}
+
+static int is_rgb_lab_profile(const char* profile) {
+    return profile && strcmp(profile, "rgb-lab") == 0;
 }
 
 static GLuint load_texture(const char* filename) {
@@ -313,7 +321,8 @@ static void write_manifest(
     int repeat,
     int cond_count,
     Condition* conds,
-    const char* gt_qr_image
+    const char* gt_qr_image,
+    const char* profile
 ) {
     if (!out_path || strlen(out_path) == 0) return;
 
@@ -339,8 +348,8 @@ static void write_manifest(
         return;
     }
 
-    // QR insert points: before condition 0, 30, and after last (60)
-    const int qr_before[] = { 0, 30, 60 };
+    // QR insert points: before condition 0, middle, and after the last condition.
+    const int qr_before[] = { 0, cond_count / 2, cond_count };
     const char* qr_names[] = { "start", "mid", "end" };
     const int qr_count = 3;
 
@@ -355,6 +364,7 @@ static void write_manifest(
     fprintf(f, "  \"gt_qr_sec\": %.6f,\n", qr_sec);
     fprintf(f, "  \"gt_qr_image\": \"%s\",\n", gt_qr_image ? gt_qr_image : "HP_QR.png");
     fprintf(f, "  \"repeat\": %d,\n", repeat);
+    fprintf(f, "  \"profile\": \"%s\",\n", profile ? profile : "default");
 
     // start_sec_from_sync: sync = red onset; then remaining red slate + post padding + content
     double t = slate_sec + padding_sec;
@@ -399,8 +409,23 @@ static void write_manifest(
     printf("[OK] wrote manifest: %s\\n", out_path);
 }
 
-static void build_conditions(Condition* out, int* out_count) {
+static void build_conditions(Condition* out, int* out_count, const char* profile) {
     int idx = 0;
+    if (is_rgb_lab_profile(profile)) {
+        for (int ci = 0; ci < LAB_CHANNEL_COUNT; ci++) {
+            for (int bi = 0; bi < BASE_IMAGE_COUNT; bi++) {
+                for (int ii = 0; ii < LAB_INTENSITY_COUNT; ii++) {
+                    out[idx].base_name = BASE_IMAGES[bi];
+                    out[idx].channel = LAB_CHANNELS[ci];
+                    out[idx].token = LAB_CHANNELS[ci];
+                    out[idx].intensity = LAB_INTENSITIES[ii];
+                    idx++;
+                }
+            }
+        }
+        *out_count = idx;
+        return;
+    }
     // Order: channel (outer) -> image (middle) -> intensity (inner)
     for (int ci = 0; ci < CHANNEL_COUNT; ci++) {
         for (int bi = 0; bi < BASE_IMAGE_COUNT; bi++) {
@@ -436,6 +461,12 @@ int main(int argc, char** argv) {
     double padding_sec = parse_double_arg(argc, argv, "--padding-sec", 5.0);
     double qr_sec = parse_double_arg(argc, argv, "--qr-sec", 3.0);
     const char* out_manifest = parse_str_arg(argc, argv, "--out-manifest", "");
+    const char* profile = parse_str_arg(argc, argv, "--profile", "default");
+
+    if (!is_rgb_lab_profile(profile) && strcmp(profile, "default") != 0) {
+        fprintf(stderr, "Unknown profile: %s (allowed: default, rgb-lab)\\n", profile);
+        return 2;
+    }
 
     if (interval < 1) interval = 1;
     if (repeat < 1) repeat = 1;
@@ -483,9 +514,11 @@ int main(int argc, char** argv) {
 
     Condition conds[128];
     int cond_count = 0;
-    build_conditions(conds, &cond_count);
-    if (cond_count != 60) {
-        printf("[WARN] expected 60 conditions, got %d\\n", cond_count);
+    build_conditions(conds, &cond_count, profile);
+    if (is_rgb_lab_profile(profile) && cond_count != 24) {
+        printf("[WARN] expected 24 rgb-lab conditions, got %d\\n", cond_count);
+    } else if (!is_rgb_lab_profile(profile) && cond_count != 60) {
+        printf("[WARN] expected 60 default conditions, got %d\\n", cond_count);
     }
 
     const char* gt_qr_path = resolve_gt_qr_path();
@@ -500,7 +533,7 @@ int main(int argc, char** argv) {
 
     write_manifest(
         out_manifest, rate_hz, exp, interval, refresh_hz,
-        block_sec, slate_sec, padding_sec, qr_sec, repeat, cond_count, conds, gt_qr_path
+        block_sec, slate_sec, padding_sec, qr_sec, repeat, cond_count, conds, gt_qr_path, profile
     );
 
     const int padding_frames = calc_frames(padding_sec, refresh_hz, interval);
@@ -558,7 +591,7 @@ int main(int argc, char** argv) {
         padding_frames, slate_frames, slate_frames, padding_frames, qr_frames,
         focus_grid_on ? "on" : "off"
     );
-    printf("[INFO] gt_qr_sec=%.3f (before cond0, before cond30, after last)\\n", qr_sec);
+    printf("[INFO] profile=%s gt_qr_sec=%.3f (before cond0, before middle, after last)\\n", profile, qr_sec);
 
     draw_slate_frames(window, slate_black_tex, padding_frames, 0.0f, 0.0f, 0.0f);
 
@@ -575,7 +608,7 @@ int main(int argc, char** argv) {
     draw_texture_frames(window, gt_qr_tex, qr_frames);
 
     for (int i = 0; i < cond_count && !glfwWindowShouldClose(window); i++) {
-        if (i == 30) {
+        if (i == cond_count / 2) {
             printf("[INFO] GT QR slot: mid\\n");
             draw_texture_frames(window, gt_qr_tex, qr_frames);
         }

@@ -182,7 +182,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--video", type=str, required=True)
     p.add_argument("--out-dir", type=str, default="")
-    p.add_argument("--conditions", type=int, default=60)
+    p.add_argument(
+        "--conditions",
+        type=int,
+        default=None,
+        help="number of blocks/conditions (default: manifest count, otherwise 60)",
+    )
     p.add_argument("--block-sec", type=float, default=6.0)
     p.add_argument("--use-start-sec", type=float, default=2.0)
     p.add_argument("--use-end-sec", type=float, default=4.0)
@@ -793,7 +798,7 @@ def main() -> None:
     if use_end <= use_start:
         raise SystemExit("use-end-sec must be > use-start-sec")
 
-    conditions = resolve_conditions(manifest, int(ns.conditions))
+    conditions = resolve_conditions(manifest, ns.conditions)
     cond_starts_sec, gt_slots, qr_sec = resolve_gt_qr_timeline(
         manifest, slate_sec, padding_sec, block_sec, len(conditions)
     )
