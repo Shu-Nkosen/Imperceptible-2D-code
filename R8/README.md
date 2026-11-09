@@ -30,6 +30,7 @@ python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --in
 生成される主なファイル（例）:
 
 - `rice_4_normalR.png` / `rice_4_invR.png`
+- `rice_12_normalLabL.png` / `rice_12_invLabL.png`（LabL）
 - `rice_4_normalX.png` / `rice_4_invX.png`（max）
 - `rice_4_normalI.png` / `rice_4_invI.png`（min）
 
@@ -141,7 +142,7 @@ python R8/analyze_code/run_pipeline.py --video R8/movie/r180_e250_f1.mp4 --manif
 24条件 manifest は条件数を自動認識するため、`--conditions` は不要です。
 
 ```bash
-python R8/analyze_code/run_pipeline.py --video R8/movie/r60_e250_f1.mp4 --manifest R8/make_movie/manifests/r60_e250_rgblab.json --mid-search
+python R8/analyze_code/run_pipeline.py --video R8/movie_rgblab/r60_e250_f1.mp4 --manifest R8/make_movie/manifests/r60_e250_rgblab.json --out-dir R8/analyze_code/out_rgblab --mid-search
 ```
 
 窓合算（accum）で解析:

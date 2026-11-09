@@ -71,6 +71,7 @@ def parse_args() -> Tuple[argparse.Namespace, List[str]]:
     )
     p.add_argument("--movie-dir", type=str, default="")
     p.add_argument("--manifest-dir", type=str, default="")
+    p.add_argument("--profile", choices=["default", "rgb-lab"], default="default")
     p.add_argument(
         "--out-dir",
         type=str,
@@ -147,11 +148,12 @@ def discover_videos(movie_dir: Path) -> Tuple[List[Path], List[Path]]:
     return accepted, rejected
 
 
-def resolve_manifest(video_path: Path, manifest_dir: Path) -> Optional[Path]:
+def resolve_manifest(video_path: Path, manifest_dir: Path, profile: str = "default") -> Optional[Path]:
     meta = parse_video_name(video_path)
     if meta is None:
         return None
-    manifest_path = manifest_dir / f"r{meta.rate_hz}_e{meta.exp}.json"
+    suffix = "_rgblab" if profile == "rgb-lab" else ""
+    manifest_path = manifest_dir / f"r{meta.rate_hz}_e{meta.exp}{suffix}.json"
     return manifest_path if manifest_path.exists() else None
 
 
@@ -488,7 +490,7 @@ def main() -> int:
 
     results: List[VideoRunResult] = []
     for idx, video_path in enumerate(videos, start=1):
-        manifest_path = resolve_manifest(video_path, manifest_dir)
+        manifest_path = resolve_manifest(video_path, manifest_dir, ns.profile)
         if manifest_path is None:
             meta = parse_video_name(video_path)
             expected = (

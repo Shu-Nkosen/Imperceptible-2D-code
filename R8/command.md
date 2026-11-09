@@ -24,6 +24,23 @@ OpenCV 8bit Lab の `L/a/b` を0〜255スケールで扱い、RGBと同じ強度
 python R8/make_movie/gen_assets.py --images rice,nagaoka_fireworks,hocho,ex --intensities 12 --channels R,G,B,LabL,LabA,LabB --clip-margin 12
 ```
 
+表示は60Hz（180Hzモニタなら `--interval 3`）で行います。動画名は既存規則の `r60_e250_f1.mp4` のまま、旧60条件動画を上書きしないよう `R8/movie_rgblab/` など別ディレクトリへ保存してください。解析は必ず24条件用 manifest を明示し、旧 `r60_e250.json` を自動選択させないでください。
+
+```powershell
+cd R8\make_movie
+.\present_session.exe --rate 60 --exp 250 --interval 3 --block-sec 6 --slate-sec 0.5 --padding-sec 5 --qr-sec 3 --repeat 1 --profile rgb-lab --out-manifest manifests\r60_e250_rgblab.json
+```
+
+```powershell
+python R8/analyze_code/run_pipeline.py --video R8/movie_rgblab/r60_e250_f1.mp4 --manifest R8/make_movie/manifests/r60_e250_rgblab.json --out-dir R8/analyze_code/out_rgblab --mid-search
+```
+
+一括解析を使う場合は、Lab用 manifest を明示します。
+
+```powershell
+python R8/analyze_code/all_analyze_mid_fast.py --profile rgb-lab --movie-dir R8/movie_rgblab --manifest-dir R8/make_movie/manifests --out-dir R8/analyze_code/out_rgblab
+```
+
 ### プレゼンターのビルド
 
 ```powershell

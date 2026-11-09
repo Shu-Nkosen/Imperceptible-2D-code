@@ -44,7 +44,7 @@ class SyncConfig:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="R8: sync(slate) detect -> split 60 conditions -> run analysis -> results.csv")
+    p = argparse.ArgumentParser(description="R8: sync(slate) detect -> split manifest conditions -> run analysis -> results.csv")
     p.add_argument("--video", type=str, required=True, help="input video path (e.g. r180_e250_f1.mp4)")
     p.add_argument("--out-dir", type=str, default="", help="output root dir (default: R8/analyze_code/out)")
     p.add_argument(
@@ -879,14 +879,16 @@ def main() -> None:
     if meta is None:
         log_warn(f"[WARN] video name does not match r{{rate}}_e{{exp}}_f{{0|1}}.mp4: {video_path.name}")
 
-    base_out = Path(ns.out_dir) if ns.out_dir else (Path(__file__).resolve().parent / "out")
+    manifest = read_manifest(Path(ns.manifest).resolve()) if ns.manifest else {}
+    default_out_name = "out_rgblab" if manifest.get("profile") == "rgb-lab" else "out"
+    base_out = Path(ns.out_dir) if ns.out_dir else (Path(__file__).resolve().parent / default_out_name)
     if not base_out.is_absolute():
         base_out = (Path(__file__).resolve().parent / base_out).resolve()
 
     out_root = base_out / (meta.stem if meta else video_path.stem)
     ensure_dir(out_root)
-
-    manifest = read_manifest(Path(ns.manifest).resolve()) if ns.manifest else {}
+    if manifest.get("profile") == "rgb-lab" and not ns.out_dir:
+        log_info(f"[INFO] rgb-lab profile: using isolated output root {base_out}")
 
     slate_sec = float(ns.slate_sec) if ns.slate_sec is not None else float(manifest.get("slate_sec", 0.5))
     padding_sec = float(ns.padding_sec) if ns.padding_sec is not None else float(manifest.get("padding_sec", 5.0))

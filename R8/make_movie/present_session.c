@@ -1,6 +1,6 @@
 // R8 sweep presenter (GLFW)
 // - Slate: black -> red (for sync detection), preferably slate_*.png with focus grid
-// - Then 60 blocks, each block_sec long
+// - Then the selected condition blocks, each block_sec long
 // - In each block, alternate normal/inv textures every frame (or every repeat frame)
 //
 // Build example (PowerShell, run inside R8/make_movie):

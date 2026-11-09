@@ -154,6 +154,7 @@ def apply_channel_delta(
     square: int,
     channel: Channel,
     delta: float,
+    stats: dict[str, float] | None = None,
 ) -> np.ndarray:
     out = img.copy()
     roi = out[:, x0 : x0 + square, :]
@@ -167,12 +168,61 @@ def apply_channel_delta(
         return out
 
     if channel in ("LabL", "LabA", "LabB"):
+        # OpenCV 8bit COLOR_BGR2LAB: L/a/b はすべて 0..255、a/b は 128 が無彩色。
         lab = cv2.cvtColor(np.clip(roi, 0, 255).astype(np.uint8), cv2.COLOR_BGR2LAB)
         lab_idx = {"LabL": 0, "LabA": 1, "LabB": 2}[channel]
-        plane = lab[:, :, lab_idx].astype(np.float32)
-        plane[black_mask] -= delta
-        lab[:, :, lab_idx] = np.clip(plane, 0, 255).astype(np.uint8)
-        out[:, x0 : x0 + square, :] = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR).astype(np.float32)
+        requested = abs(float(delta))
+        safe = np.full(lab.shape[:2], requested, dtype=np.float32)
+        black_count = int(np.count_nonzero(black_mask))
+
+        # Find a symmetric per-pixel Lab step that stays in the RGB gamut in
+        # both directions, so normal/inv have the same available signal.
+        if requested > 0 and black_count > 0:
+            low = np.zeros_like(safe)
+            high = safe.copy()
+            for _ in range(8):
+                candidate = (low + high) * 0.5
+                lab_down = lab.copy()
+                lab_up = lab.copy()
+                down_plane = lab_down[:, :, lab_idx].astype(np.float32) - candidate
+                up_plane = lab_up[:, :, lab_idx].astype(np.float32) + candidate
+                lab_down[:, :, lab_idx] = np.clip(down_plane, 0, 255).astype(np.uint8)
+                lab_up[:, :, lab_idx] = np.clip(up_plane, 0, 255).astype(np.uint8)
+                bgr_down = cv2.cvtColor(lab_down, cv2.COLOR_LAB2BGR)
+                bgr_up = cv2.cvtColor(lab_up, cv2.COLOR_LAB2BGR)
+                gamut_ok = (
+                    np.all((bgr_down > 0) & (bgr_down < 255), axis=2)
+                    & np.all((bgr_up > 0) & (bgr_up < 255), axis=2)
+                )
+                gamut_ok &= black_mask
+                low[gamut_ok] = candidate[gamut_ok]
+                high[~gamut_ok & black_mask] = candidate[~gamut_ok & black_mask]
+            safe = low
+
+        signed_step = -safe if delta > 0 else safe
+        adjusted_lab = lab.copy()
+        adjusted_plane = adjusted_lab[:, :, lab_idx].astype(np.float32) + signed_step
+        adjusted_lab[:, :, lab_idx] = np.clip(adjusted_plane, 0, 255).astype(np.uint8)
+        adjusted_bgr = cv2.cvtColor(adjusted_lab, cv2.COLOR_LAB2BGR)
+        changed_roi = roi.copy()
+        changed_roi[black_mask] = adjusted_bgr[black_mask].astype(np.float32)
+        out[:, x0 : x0 + square, :] = changed_roi
+
+        if stats is not None:
+            actual_lab = cv2.cvtColor(np.clip(changed_roi, 0, 255).astype(np.uint8), cv2.COLOR_BGR2LAB)
+            actual_delta = np.abs(
+                actual_lab[:, :, lab_idx].astype(np.float32)
+                - lab[:, :, lab_idx].astype(np.float32)
+            )
+            saturated = np.any(
+                (adjusted_bgr <= 0) | (adjusted_bgr >= 255), axis=2
+            )
+            stats.update(
+                requested_lab_delta=requested,
+                effective_lab_delta_mean=float(actual_delta[black_mask].mean()) if black_count else 0.0,
+                safe_scale_mean=float((safe[black_mask] / requested).mean()) if requested and black_count else 1.0,
+                saturated_pct=float(100.0 * saturated[black_mask].mean()) if black_count else 0.0,
+            )
         return out
 
     # max/min mode: choose per-pixel channel index from current roi (preclipped)
@@ -230,16 +280,32 @@ def main() -> None:
                 token = token_for_channel(channel)
 
                 # normal: darken (delta positive)
-                normal = apply_channel_delta(base, black_mask, x0, square, channel, delta=float(intensity))
+                normal_stats: dict[str, float] = {}
+                normal = apply_channel_delta(
+                    base, black_mask, x0, square, channel, delta=float(intensity), stats=normal_stats
+                )
                 normal_name = f"{base_name}_{intensity}_normal{token}.png"
                 cv2.imwrite(str(args.out_dir / normal_name), normal.astype(np.uint8))
                 generated += 1
 
                 # inv: brighten (delta negative) => subtract(-intensity)
-                inv = apply_channel_delta(base, black_mask, x0, square, channel, delta=float(-intensity))
+                inv_stats: dict[str, float] = {}
+                inv = apply_channel_delta(
+                    base, black_mask, x0, square, channel, delta=float(-intensity), stats=inv_stats
+                )
                 inv_name = f"{base_name}_{intensity}_inv{token}.png"
                 cv2.imwrite(str(args.out_dir / inv_name), inv.astype(np.uint8))
                 generated += 1
+
+                if channel in ("LabL", "LabA", "LabB"):
+                    print(
+                        f"[LAB] {base_name} intensity={intensity} channel={channel} "
+                        f"normal_effective={normal_stats['effective_lab_delta_mean']:.3f} "
+                        f"inv_effective={inv_stats['effective_lab_delta_mean']:.3f} "
+                        f"safe_scale={normal_stats['safe_scale_mean']:.3f} "
+                        f"normal_saturated={normal_stats['saturated_pct']:.3f}% "
+                        f"inv_saturated={inv_stats['saturated_pct']:.3f}%"
+                    )
 
     # slate assets: solid + sparse focus grid (phone AF aid; low impact on sync color means)
     focus_spacing = 80
