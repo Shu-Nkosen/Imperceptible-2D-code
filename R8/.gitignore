@@ -1,3 +1,6 @@
 analyze_code/out_rgblab/**/**/*.png
 analyze_code/out_rgblab/**/*.png
 movie_rgblab/
+analyze_lab/out/**/*.png
+analyze_lab/out/**/*.npy
+analyze_lab/out/**/*.log

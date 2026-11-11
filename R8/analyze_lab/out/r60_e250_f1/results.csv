@@ -1,0 +1,25 @@
+﻿folder,decode_note,decode_variant,diff_mode,window_n,stat_kind,fft_target_hz,diff_threshold,pixel_acc_all,pixel_acc_ok,pixel_acc_best,best_pair_frame_1,best_pair_frame_2,video,display_rate,exposure,fluorescent,camera_fps,rate_hz,exposure_denom,fluorescent_flag,cond,image,channel,token,intensity,decode_decoded_text,decode_method,decode_frame_1,decode_frame_2,note,analysis_frames,extract_sec
+rice_R_12,QR未検出,,lab_pair,,,,sign,0.654849,,0.750184,frame_00007.png,frame_00008.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,0,rice,R,R,12,,,,,,120,2.000147
+nagaoka_fireworks_R_12,QR未検出,,lab_pair,,,,sign,0.648593,,0.769145,frame_00099.png,frame_00100.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,1,nagaoka_fireworks,R,R,12,,,,,,120,2.000147
+hocho_R_12,QR未検出,,lab_pair,,,,sign,0.647310,,0.747048,frame_00103.png,frame_00104.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,2,hocho,R,R,12,,,,,,120,2.000147
+ex_R_12,QR未検出,,lab_pair,,,,sign,0.655746,,0.777968,frame_00109.png,frame_00110.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,3,ex,R,R,12,,,,,,120,2.000147
+rice_G_12,QR未検出,,lab_pair,,,,sign,0.722649,,0.795301,frame_00109.png,frame_00110.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,4,rice,G,G,12,,,,,,120,2.000147
+nagaoka_fireworks_G_12,QR未検出,,lab_pair,,,,sign,0.741428,,0.795066,frame_00012.png,frame_00013.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,5,nagaoka_fireworks,G,G,12,,,,,,120,2.000147
+hocho_G_12,QR未検出,,lab_pair,,,,sign,0.723469,,0.758397,frame_00018.png,frame_00019.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,6,hocho,G,G,12,,,,,,120,2.000147
+ex_G_12,QR未検出,,lab_pair,,,,sign,0.719089,,0.766631,frame_00118.png,frame_00119.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,7,ex,G,G,12,,,,,,120,2.000147
+rice_B_12,QR未検出,,lab_pair,,,,sign,0.686204,,0.727630,frame_00114.png,frame_00115.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,8,rice,B,B,12,,,,,,120,2.000147
+nagaoka_fireworks_B_12,QR未検出,,lab_pair,,,,sign,0.747541,,0.793180,frame_00006.png,frame_00007.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,9,nagaoka_fireworks,B,B,12,,,,,,120,2.000147
+hocho_B_12,QR未検出,,lab_pair,,,,sign,0.714741,,0.747711,frame_00107.png,frame_00108.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,10,hocho,B,B,12,,,,,,120,2.000147
+ex_B_12,QR未検出,,lab_pair,,,,sign,0.739378,,0.795549,frame_00102.png,frame_00103.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,11,ex,B,B,12,,,,,,120,2.000147
+rice_LabL_12,QR未検出,,lab_pair,,,,sign,0.705927,,0.838824,frame_00000.png,frame_00001.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,12,rice,LabL,LabL,12,,,,,,120,2.000147
+nagaoka_fireworks_LabL_12,QR未検出,,lab_pair,,,,sign,0.688138,,0.820020,frame_00008.png,frame_00009.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,13,nagaoka_fireworks,LabL,LabL,12,,,,,,120,2.000147
+hocho_LabL_12,QR未検出,,lab_pair,,,,sign,0.599375,,0.715647,frame_00004.png,frame_00005.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,14,hocho,LabL,LabL,12,,,,,,120,2.000147
+ex_LabL_12,QR未検出,,lab_pair,,,,sign,0.601728,,0.686931,frame_00018.png,frame_00019.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,15,ex,LabL,LabL,12,,,,,,120,2.000147
+rice_LabA_12,QR未検出,,lab_pair,,,,sign,0.568539,,0.618428,frame_00117.png,frame_00118.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,16,rice,LabA,LabA,12,,,,,,120,2.000147
+nagaoka_fireworks_LabA_12,QR未検出,,lab_pair,,,,sign,0.606547,,0.686599,frame_00008.png,frame_00009.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,17,nagaoka_fireworks,LabA,LabA,12,,,,,,120,2.000147
+hocho_LabA_12,QR未検出,,lab_pair,,,,sign,0.595209,,0.694738,frame_00117.png,frame_00118.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,18,hocho,LabA,LabA,12,,,,,,120,2.000147
+ex_LabA_12,QR未検出,,lab_pair,,,,sign,0.629000,,0.756045,frame_00107.png,frame_00108.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,19,ex,LabA,LabA,12,,,,,,120,2.000147
+rice_LabB_12,QR未検出,,lab_pair,,,,sign,0.615259,,0.715862,frame_00105.png,frame_00106.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,20,rice,LabB,LabB,12,,,,,,120,2.000147
+nagaoka_fireworks_LabB_12,QR未検出,,lab_pair,,,,sign,0.604342,,0.727225,frame_00005.png,frame_00006.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,21,nagaoka_fireworks,LabB,LabB,12,,,,,,120,2.000147
+hocho_LabB_12,QR未検出,,lab_pair,,,,sign,0.621335,,0.742060,frame_00011.png,frame_00012.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,22,hocho,LabB,LabB,12,,,,,,120,2.000147
+ex_LabB_12,QR未検出,,lab_pair,,,,sign,0.627627,,0.757228,frame_00003.png,frame_00004.png,r60_e250_f1.mp4,60 Hz,1/250,蛍光灯あり,59.996 fps,60,250,1,23,ex,LabB,LabB,12,,,,,,120,2.000147
