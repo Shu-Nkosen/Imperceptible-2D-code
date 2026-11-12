@@ -21,6 +21,7 @@ from decode_qr_from_all_frames import (  # noqa: E402
 )
 from run_pipeline import (  # noqa: E402
     ANALYSIS_FRAME_COUNT,
+    PAIR_OUTPUT_EACH_END,
     SyncConfig,
     condition_folder_name,
     detect_black_to_red_sync,
@@ -74,7 +75,10 @@ def write_csv(path: Path, rows: Iterable[dict[str, Any]], fields: tuple[str, ...
         writer.writerows({field: row.get(field, "") for field in fields} for row in rows)
 
 
-def selected_adjacent_pairs(frame_paths: list[Path], each_end: int = 20) -> list[tuple[Path, Path]]:
+def selected_adjacent_pairs(
+    frame_paths: list[Path],
+    each_end: int = PAIR_OUTPUT_EACH_END,
+) -> list[tuple[Path, Path]]:
     ordered = sorted(frame_paths, key=lambda path: int(path.stem.split("_")[-1]))
     pairs = list(zip(ordered, ordered[1:]))
     if len(pairs) <= each_end * 2:
@@ -87,7 +91,10 @@ def load_lab(path: Path) -> np.ndarray:
     if image is None:
         raise FileNotFoundError(f"cannot read frame: {path}")
     image_f32 = image.astype(np.float32) / 255.0
-    return cv2.cvtColor(image_f32, cv2.COLOR_BGR2LAB)
+    lab = cv2.cvtColor(image_f32, cv2.COLOR_BGR2LAB)
+    # OpenCV stores float Lab a*/b* with a +128 offset; use signed CIE Lab.
+    lab[:, :, 1:] -= 128.0
+    return lab
 
 
 def infer_module_count(gt_mask: np.ndarray, module_count: int) -> int:
